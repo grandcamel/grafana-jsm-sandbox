@@ -40,6 +40,10 @@ _Avoid_: harness, agent, session, job
 The localhost process, owned by the Receiver, that holds the real Jira credential and forwards a Run's Jira requests with that credential attached. A Run only ever holds a sentinel.
 _Avoid_: proxy, sidecar, hand, vault
 
+**Sentinel**:
+The random token generated for one Run and registered with the Forwarder for that Run's lifetime. It stands where the Jira API token would be in a Run's environment, and is worth nothing anywhere else or once the Run has ended.
+_Avoid_: fake token, dummy credential, placeholder, api key
+
 **Transcript**:
 The stream-json output of one Run, one Run event per line. The Receiver renders it into the container log as it arrives, and a recorded Transcript is committed as a fixture.
 _Avoid_: log, output, stream, session log

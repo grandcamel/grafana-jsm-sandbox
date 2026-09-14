@@ -1,12 +1,14 @@
-"""Shared fixtures for Receiver tests.
+"""Shared fixtures for the tests that drive a real server over real HTTP.
 
-Every test here drives a real Receiver over real HTTP on an ephemeral port.
-Nothing in the HTTP layer is mocked; the only substitution is the Run spawner,
-which is injected into the Receiver at construction.
+Every test here drives a real Receiver or a real Forwarder over real HTTP on an
+ephemeral port. Nothing in the HTTP layer is mocked; the substitutions are the
+Run spawner, which is injected into the Receiver at construction, and the
+Forwarder's upstream, which is a fake Atlassian site on another ephemeral port.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
@@ -17,9 +19,15 @@ from pathlib import Path
 
 import pytest
 
+from grafana_jsm_sandbox.forwarder import Forwarder, JiraCredential
 from grafana_jsm_sandbox.receiver import Receiver, Run
+from tests.upstream import FakeUpstream
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
+
+REAL_EMAIL = "ops@example.invalid"
+REAL_TOKEN = "real-jira-token-that-must-never-be-logged"
+"""The credential the Forwarder holds. No Run and no log line may ever contain it."""
 
 
 def firing_notification() -> dict:
@@ -89,6 +97,7 @@ class RecordingSpawner:
 class Response:
     status: int
     body: bytes
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def post_notification(receiver: Receiver, body) -> Response:
@@ -99,21 +108,61 @@ def post_notification(receiver: Receiver, body) -> Response:
         data = body.encode()
     else:
         data = json.dumps(body).encode()
-    return _request(receiver.url + "/notification", data=data, content_type="application/json")
+    return http_request(
+        receiver.url + "/notification", method="POST", data=data, content_type="application/json"
+    )
 
 
 def get_health(receiver: Receiver) -> Response:
-    return _request(receiver.url + "/health")
+    return http_request(receiver.url + "/health")
 
 
-def _request(url: str, data: bytes | None = None, content_type: str | None = None) -> Response:
-    headers = {"Content-Type": content_type} if content_type else {}
-    request = urllib.request.Request(url, data=data, headers=headers)
+def basic_auth_header(user: str, password: str) -> str:
+    return "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+
+
+def http_request(
+    url: str,
+    method: str = "GET",
+    data: bytes | None = None,
+    content_type: str | None = None,
+    headers: dict[str, str] | None = None,
+    basic_auth: tuple[str, str] | None = None,
+) -> Response:
+    """One real HTTP request. A 4xx or 5xx comes back as a Response, not an exception."""
+    sent = dict(headers or {})
+    if content_type:
+        sent["Content-Type"] = content_type
+    if basic_auth is not None:
+        sent["Authorization"] = basic_auth_header(*basic_auth)
+    request = urllib.request.Request(url, data=data, headers=sent, method=method)
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
-            return Response(response.status, response.read())
+            return Response(response.status, response.read(), dict(response.headers))
     except urllib.error.HTTPError as error:
-        return Response(error.code, error.read())
+        return Response(error.code, error.read(), dict(error.headers))
+
+
+@pytest.fixture
+def upstream():
+    upstream = FakeUpstream()
+    upstream.start()
+    try:
+        yield upstream
+    finally:
+        upstream.stop()
+
+
+@pytest.fixture
+def forwarder(upstream):
+    forwarder = Forwarder(
+        JiraCredential(site_url=upstream.url, email=REAL_EMAIL, api_token=REAL_TOKEN)
+    )
+    forwarder.start()
+    try:
+        yield forwarder
+    finally:
+        forwarder.stop()
 
 
 @pytest.fixture

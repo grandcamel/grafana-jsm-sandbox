@@ -23,8 +23,8 @@ duplicate Incidents. The Receiver logs each Run's start, end, exit status and du
 blows up is logged and the next one still starts.
 
 The process that actually spawns a Run is injected into the `Receiver` at construction, so it is
-still a seam — the real Claude CLI invocation, the Forwarder, the container and the Grafana
-provisioning are later tickets.
+still a seam — the real Claude CLI invocation, the container and the Grafana provisioning are
+later tickets.
 
 The **log formatter** — what turns a Run's Transcript into the log window the audience watches.
 
@@ -60,6 +60,36 @@ python3 -m grafana_jsm_sandbox.log_formatter fixtures/run-transcript.jsonl
 
 Nothing pipes a live Run through it yet; the Receiver wires it up in ticket 05.
 
+The **Forwarder** — the localhost process that holds the real Jira credential so a Run never does.
+
+A Run's environment points jira-as at the Forwarder over plain http, with a per-Run **sentinel**
+in place of the API token. The Forwarder swaps that sentinel for the real email and token and
+forwards the request to the configured Atlassian site (ADR 0002). It binds to loopback only, takes
+its upstream from configuration and never from the request, hands a redirect back rather than
+following it somewhere else, and refuses a request whose sentinel is missing, wrong, or left over
+from a Run that has ended. Neither the token nor an Authorization header reaches any log line.
+
+Run it on its own to point a jira-as on this machine at the real site through a sentinel:
+
+```bash
+python3 -m grafana_jsm_sandbox.forwarder
+```
+
+```
+forwarding to https://example.atlassian.net as ops@example.com
+point jira-as at the Forwarder with a sentinel in place of the token:
+
+    export JIRA_SITE_URL=http://127.0.0.1:61545
+    export JIRA_API_TOKEN=<a fresh 32-character sentinel>
+
+forwarded GET /rest/api/3/search/jql?jql=project+%3D+OPS, upstream said 200
+refused a GET /rest/api/3/myself with no valid sentinel
+```
+
+It reads `JIRA_SITE_URL`, `JIRA_EMAIL` and `JIRA_API_TOKEN` from its own environment and fails at
+startup, naming every variable that is missing, rather than no-opping during the demo. The
+Receiver owns the Forwarder and registers each Run's sentinel in ticket 05.
+
 ## Layout
 
 | Path | What it holds |
@@ -67,9 +97,10 @@ Nothing pipes a live Run through it yet; the Receiver wires it up in ticket 05.
 | `grafana_jsm_sandbox/receiver.py` | The Receiver, its Run queue and the `Run` record |
 | `grafana_jsm_sandbox/notification.py` | Validation of an incoming Notification |
 | `grafana_jsm_sandbox/log_formatter.py` | Rendering a Run's Transcript, and the redaction rules |
+| `grafana_jsm_sandbox/forwarder.py` | The Forwarder, the sentinel check and the Jira credential |
 | `fixtures/notification-firing.json` | A canned firing Notification for tests and demo fallback |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
-| `tests/` | pytest, driving a real Receiver over real HTTP on an ephemeral port |
+| `tests/` | pytest, driving a real Receiver and Forwarder over real HTTP on ephemeral ports |
 
 ## Running the tests
 
