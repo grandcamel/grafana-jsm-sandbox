@@ -1,0 +1,6 @@
+{
+  "jira": {
+    "allowed_projects": ["OPS"],
+    "allow_site_operations": true
+  }
+}
