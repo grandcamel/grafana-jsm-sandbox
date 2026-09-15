@@ -129,8 +129,8 @@ that outlives its timeout is killed and logged, and the queue behind it keeps mo
 
 ## Running the demo on the laptop
 
-The Receiver, the Forwarder and real Runs are one process — the container's main process in ticket
-06, and this on a laptop:
+The Receiver, the Forwarder and real Runs are one process — the demo container's main process,
+and this on a laptop:
 
 ```bash
 python3 -m grafana_jsm_sandbox
@@ -157,6 +157,42 @@ which is also the demo's fallback if Grafana is uncooperative:
 python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 30
 ```
 
+## Running the demo in the container
+
+`docker compose up` is the whole demo: the LGTM stack the Alert will fire from, and one demo
+container whose main process is the Receiver, on one network so that Grafana's contact point can
+name `demo` by service name.
+
+```bash
+cp .env.example .env     # then fill in the four credentials
+docker compose up -d --build
+docker compose logs -f demo
+```
+
+The image extends the `claude-devcontainer` image already on this machine and adds exactly what a
+Run needs: a current Claude Code, a pinned `jira-as`, and the skill. It runs as that image's
+non-root `devuser`, pre-accepts Claude Code's onboarding the way the existing container
+entrypoints do, mounts no Docker socket, and holds no credential — those arrive at `docker compose
+up` from `.env`, which git ignores and the build context refuses.
+
+The Receiver answers on the compose network at `http://demo:8080`, which is what Grafana will
+post to, and on the laptop at `http://localhost:8080`, which is where the replay script posts:
+
+```bash
+curl -fsS http://localhost:8080/health
+python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 30
+```
+
+Grafana is on the laptop at <http://localhost:3000>, anonymous admin, no login form.
+
+Everything a Run does arrives in `docker compose logs -f demo` through the formatter — its own
+text, every `jira-as` command in full, and every denial. To look around inside, the entrypoint
+honours a command:
+
+```bash
+docker compose run --rm demo sh
+```
+
 ## Layout
 
 | Path | What it holds |
@@ -170,6 +206,10 @@ python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 3
 | `grafana_jsm_sandbox/replay.py` | Posting the canned Notification sequence at a Receiver |
 | `grafana_jsm_sandbox/__main__.py` | The whole process: configuration, the Forwarder, the Receiver |
 | `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
+| `Dockerfile` | The demo image: Claude Code, `jira-as`, the package and the skill |
+| `docker/entrypoint.sh` | What the container starts: onboarding pre-accepted, then the Receiver |
+| `docker-compose.yml` | The LGTM stack and the demo container, on one network |
+| `.env.example` | Every variable the container needs, with placeholders |
 | `fixtures/notification-*.json` | The canned Notification sequence: firing, repeat, resolved |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
 | `fixtures/run-transcript-repeat-firing.jsonl` | A recorded Run that commented a trend on a real Incident |
@@ -177,7 +217,8 @@ python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 3
 
 ## Running the tests
 
-Python 3.11 or newer; the runtime is standard library only, and pytest is the one dev dependency.
+Python 3.11 or newer. The runtime is standard library only; the dev dependencies are pytest
+and PyYAML, which the container checks use to read `docker-compose.yml`.
 
 ```bash
 python3 -m pytest
@@ -192,3 +233,17 @@ watched on the way out:
 ```bash
 DEMO_END_TO_END=1 python3 -m pytest tests/test_end_to_end.py
 ```
+
+The checks that need the container are opt-in the same way, and need nothing but `docker compose
+up -d` first. They ask the two questions compose cannot answer on its own: whether the health
+endpoint answers the laptop and the `lgtm` container, and whether the Receiver is really running
+as a user who is not root with the two executables a Run is allowed on its PATH.
+
+```bash
+DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py
+```
+
+Everything else in `tests/test_container.py` runs by default and builds nothing: it reads the
+committed `Dockerfile`, `docker-compose.yml` and `.env.example` and drives them against the code
+they configure — the example is fed to the real configuration reader, its values through the real
+redaction, and the ignore rules through real `git check-ignore`.

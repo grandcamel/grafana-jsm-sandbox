@@ -1,0 +1,56 @@
+# The whole demo: the LGTM stack the Alert fires from, and the container the Run
+# happens in, on one network so Grafana's contact point can name `demo` by service
+# name and the presenter can watch both from the laptop.
+#
+#     cp .env.example .env    # then fill it in
+#     docker compose up -d --build
+#     docker compose logs -f demo
+#
+# No Docker socket is mounted anywhere, and no credential is written here: the
+# demo service reads .env, which git ignores and the build context refuses.
+
+services:
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000" # Grafana, which is what the audience watches
+      - "4317:4317" # OTLP gRPC, for the synthetic traffic source in ticket 07
+      - "4318:4318" # OTLP HTTP
+    environment:
+      GF_PATHS_DATA: /data/grafana
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    networks:
+      - demo
+    restart: unless-stopped
+
+  demo:
+    build:
+      context: .
+    image: grafana-jsm-sandbox:latest
+    # The Jira credential and the Anthropic token, from a file git never takes.
+    env_file:
+      - .env
+    ports:
+      # The Receiver, so the replay script can post from the laptop. Grafana
+      # reaches it on the network instead, at http://demo:8080/notification.
+      - "8080:8080"
+    networks:
+      - demo
+    # The base image gives devuser passwordless sudo. The Receiver never needs it,
+    # and this makes that true rather than merely intended.
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Deliberately no restart policy. The Receiver refuses to start on a half-filled
+    # .env and says which variable is missing; restarting it would turn that one
+    # readable message into a crash loop that scrolls itself away.
+
+networks:
+  demo:
