@@ -49,12 +49,18 @@ services:
       - "8080:8080"
     networks:
       - demo
-    # The base image gives devuser passwordless sudo. The Receiver never needs it,
-    # and this makes that true rather than merely intended.
+    # The image has no sudo and no setuid route to root (ADR 0005); this says a
+    # Run could not gain one even if something in the image were to grow it back.
     security_opt:
       - no-new-privileges:true
+    # Python's standard library, because the image carries no curl: compose must
+    # report the container healthy for the right reason.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=4)
       interval: 10s
       timeout: 5s
       retries: 3

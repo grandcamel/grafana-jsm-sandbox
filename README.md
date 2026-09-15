@@ -4,7 +4,8 @@ A Grafana alert Notification triggers a headless Claude Run inside a container, 
 creates, updates and resolves Incidents in the Jira OPS project.
 
 Domain vocabulary is in [CONTEXT.md](CONTEXT.md); decisions are in [docs/adr](docs/adr);
-the spec and tickets are under [.scratch/alert-to-incident-sync](.scratch/alert-to-incident-sync).
+the spec and tickets are under [.scratch/alert-to-incident-sync](.scratch/alert-to-incident-sync)
+and, for the hardened image, [.scratch/hardened-demo-image](.scratch/hardened-demo-image).
 
 ## What exists today
 
@@ -170,11 +171,17 @@ docker compose up -d --build
 docker compose logs -f demo
 ```
 
-The image extends the `claude-devcontainer` image already on this machine and adds exactly what a
-Run needs: a current Claude Code, a pinned `jira-as`, and the skill. It runs as that image's
-non-root `devuser`, pre-accepts Claude Code's onboarding the way the existing container
-entrypoints do, mounts no Docker socket, and holds no credential — those arrive at `docker compose
-up` from `.env`, which git ignores and the build context refuses.
+The image carries only what a Run needs (ADR 0005). It is built from the slim official Node
+image at a pinned tag, plus the distribution's Python 3 and TLS roots, and installs exactly Claude
+Code and `jira-as` at pinned versions, this package and the skill. It runs as `demo`, a non-root
+user the Dockerfile creates; the base image's own account and package managers are removed. There
+is no `sudo`, no `docker` CLI or group, no `gh`, `git`, `curl` or `jq` — `ls /usr/local/bin` inside
+the container is `claude`, `jira-as`, `node`, `nodejs`, `npm` and `npx`, and that is the answer to "what else can a
+Run reach for". The entrypoint pre-accepts Claude Code's onboarding with Python's standard library
+and the healthcheck asks the health endpoint the same way, because nothing else is there to do it
+with. It mounts no Docker socket and holds no credential — those arrive at `docker compose up`
+from `.env`, which git ignores and the build context refuses. The image is 539 MB; the developer
+image it replaced was 4.35 GB.
 
 The Receiver answers on the compose network at `http://demo:8080`, which is what Grafana will
 post to, and on the laptop at `http://localhost:8080`, which is where the replay script posts:
@@ -275,7 +282,7 @@ deletes.
 | `docs/demo-runbook.md` | The presenter's runbook: screen, checks, actions, spoken points, fallback, reset |
 | `grafana_jsm_sandbox/__main__.py` | The whole process: configuration, the Forwarder, the Receiver |
 | `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
-| `Dockerfile` | The demo image: Claude Code, `jira-as`, the package and the skill |
+| `Dockerfile` | The demo image: slim Node plus Python, Claude Code, `jira-as`, the package and the skill, one non-root user |
 | `docker/entrypoint.sh` | What the container starts: onboarding pre-accepted, then the Receiver |
 | `docker-compose.yml` | The LGTM stack, the demo container, rolldice and its traffic, on one network |
 | `docker/rolldice/` | The rolldice example app, copied from the otel-lgtm examples, auto-instrumented |
@@ -306,9 +313,11 @@ DEMO_END_TO_END=1 python3 -m pytest tests/test_end_to_end.py
 ```
 
 The checks that need the container are opt-in the same way, and need nothing but `docker compose
-up -d` first. They ask the two questions compose cannot answer on its own: whether the health
-endpoint answers the laptop and the `lgtm` container, and whether the Receiver is really running
-as a user who is not root with the two executables a Run is allowed on its PATH.
+up -d` first. They ask the questions compose cannot answer on its own: whether the health
+endpoint answers the laptop and the `lgtm` container, whether the Receiver is really running
+as a user who is not root with the two executables a Run is allowed on its PATH, and whether
+`sudo`, `docker`, `gh`, `git`, `curl` and `jq` are really absent from it, along with any `docker`
+group, on a Node new enough to read the operating system trust store.
 
 ```bash
 DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py
@@ -328,6 +337,10 @@ DEMO_CONTAINER=1 python3 -m pytest tests/test_grafana.py
 Everything else in `tests/test_container.py` runs by default and builds nothing: it reads the
 committed `Dockerfile`, `docker-compose.yml` and `.env.example` and drives them against the code
 they configure — the example is fed to the real configuration reader, its values through the real
-redaction, and the ignore rules through real `git check-ignore`. It also holds compose to the
-three things the live Alert depends on: every service on the one network, this repo's
-provisioning directory mounted where Grafana reads it, and a stopped `traffic` staying stopped.
+redaction, the ignore rules through real `git check-ignore`, and the entrypoint is run under `sh`
+on a PATH holding only what the slim image carries. It holds the Dockerfile to ADR 0005: the base
+is the slim Node image at a pinned tag, Claude Code and `jira-as` are pinned, the distribution
+adds nothing but TLS roots and a Python, no line installs an escalation tool, and the last `USER`
+is one the Dockerfile created. It also holds compose to the three things the live Alert depends
+on: every service on the one network, this repo's provisioning directory mounted where Grafana
+reads it, and a stopped `traffic` staying stopped.

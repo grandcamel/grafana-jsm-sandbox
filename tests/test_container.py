@@ -14,6 +14,9 @@ end-to-end check, because they cost a build and a demo:
 
 from __future__ import annotations
 
+import json
+import re
+import shutil
 import subprocess
 import urllib.request
 
@@ -282,3 +285,186 @@ def _as_list(value) -> list[str]:
 def _get(url: str) -> int:
     with urllib.request.urlopen(url, timeout=5) as response:
         return response.status
+
+
+# --- The image carries only what a Run needs (ticket 01 of hardened-demo-image) ---
+
+
+def dockerfile_instructions() -> list[str]:
+    """The Dockerfile's instructions, continuation lines joined and comments dropped."""
+    instructions: list[str] = []
+    for raw in DOCKERFILE.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if instructions and instructions[-1].endswith("\\"):
+            instructions[-1] = instructions[-1][:-1] + " " + line
+        else:
+            instructions.append(line)
+    return instructions
+
+
+def build_argument_default(name: str) -> str:
+    """What `ARG <name>=<default>` in the Dockerfile falls back to when compose passes nothing."""
+    for instruction in dockerfile_instructions():
+        if instruction.startswith(f"ARG {name}="):
+            return instruction.partition("=")[2].strip()
+    raise AssertionError(f"the Dockerfile declares no ARG {name}")
+
+
+def test_the_image_is_built_from_the_slim_official_node_image_at_a_pinned_tag():
+    """A build on another laptop must produce the image that was rehearsed (story 24)."""
+    base = build_argument_default("BASE_IMAGE")
+    repository, _, tag = base.partition(":")
+
+    assert repository == "node", f"the base is {base}, not the official Node image"
+    assert re.fullmatch(r"\d+\.\d+\.\d+-\w+-slim", tag), f"{tag} is not a pinned slim tag"
+    assert "FROM ${BASE_IMAGE}" in dockerfile_instructions(), "the build argument is not used"
+
+
+ESCALATION_TOOLS = ("sudo", "docker", "docker.io", "docker-ce", "gh", "git", "curl", "jq")
+"""What the old base image carried and a Run must not find (stories 9 and 14)."""
+
+PACKAGES_A_RUN_NEEDS = {"ca-certificates", "python3", "python3-venv"}
+"""Everything the distribution may add to the base image: TLS roots, and a Python to run
+the Receiver and hold jira-as."""
+
+
+def run_instructions() -> list[str]:
+    return [line for line in dockerfile_instructions() if line.startswith("RUN ")]
+
+
+def apt_packages() -> set[str]:
+    """Every package name an `apt-get install` in the Dockerfile asks for."""
+    packages: set[str] = set()
+    for instruction in run_instructions():
+        for command in re.split(r"&&|;", instruction[len("RUN ") :]):
+            words = command.split()
+            if words[:2] == ["apt-get", "install"]:
+                packages |= {word for word in words[2:] if not word.startswith("-")}
+    return packages
+
+
+def test_no_line_of_the_build_installs_an_escalation_tool():
+    """The default run says it with no stack up; `TestAStackThatIsUp` asks the container."""
+    for instruction in run_instructions():
+        words = set(re.split(r"[\s=\"']+", instruction))
+        assert not words & set(ESCALATION_TOOLS), f"an escalation tool is installed: {instruction}"
+
+
+def test_the_distribution_adds_nothing_but_tls_roots_and_a_python():
+    assert apt_packages() <= PACKAGES_A_RUN_NEEDS, f"{apt_packages() - PACKAGES_A_RUN_NEEDS} too"
+
+
+def test_claude_code_and_jira_as_are_pinned():
+    """A rebuild on demo day must not ship a Transcript shape nothing has ever seen."""
+    for argument in ("CLAUDE_CODE_VERSION", "JIRA_AS_VERSION"):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", build_argument_default(argument)), argument
+
+
+def test_the_user_the_container_ends_as_was_created_by_this_dockerfile():
+    """Not inherited from a base image whose groups and sudoers nobody here wrote (story 14)."""
+    users = [
+        line.split(maxsplit=1)[1] for line in dockerfile_instructions() if line.startswith("USER ")
+    ]
+    created = [
+        line for line in run_instructions() if "useradd " in line and users[-1] in line.split()
+    ]
+
+    assert created, f"{users[-1]} is not created by a useradd in the Dockerfile"
+
+
+ENTRYPOINT = REPOSITORY / "docker" / "entrypoint.sh"
+"""What the container starts: onboarding pre-accepted, then the command it was given."""
+
+TOOLS_THE_IMAGE_CARRIES = ("sh", "mkdir", "chmod", "python3")
+"""All the entrypoint may call. The slim image has no jq (story 21), so the test's PATH has none."""
+
+ONBOARDING_FLAG = "hasCompletedOnboarding"
+
+
+def start_container_with(tmp_path, *command: str, existing: dict | None = None) -> tuple:
+    """Run the real entrypoint as the container would, on a PATH of only what the image carries.
+
+    Returns the pre-accepted onboarding file's contents and the command's output.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for tool in TOOLS_THE_IMAGE_CARRIES:
+        found = shutil.which(tool)
+        assert found, f"{tool} is not on this machine"
+        (bin_dir / tool).symlink_to(found)
+    config_dir = tmp_path / "claude"
+    if existing is not None:
+        config_dir.mkdir()
+        (config_dir / ".claude.json").write_text(json.dumps(existing))
+
+    started = subprocess.run(
+        ["sh", str(ENTRYPOINT), *command],
+        env={"PATH": str(bin_dir), "CLAUDE_CONFIG_DIR": str(config_dir), "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert started.returncode == 0, started.stderr
+    onboarding = config_dir / ".claude.json"
+    assert oct(onboarding.stat().st_mode)[-3:] == "600"
+    return json.loads(onboarding.read_text()), started.stdout
+
+
+def test_the_entrypoint_pre_accepts_onboarding_and_becomes_the_command_it_was_given(tmp_path):
+    """A fresh container: no config yet, and the one flag headless Claude needs is written."""
+    onboarding, output = start_container_with(tmp_path, "sh", "-c", "echo became the command")
+
+    assert onboarding == {ONBOARDING_FLAG: True}
+    assert output.strip() == "became the command"
+
+
+def test_the_entrypoint_keeps_whatever_claude_code_already_wrote(tmp_path):
+    """A restart: Claude Code's own configuration is there, and only the flag is added to it."""
+    onboarding, _ = start_container_with(
+        tmp_path, "sh", "-c", "true", existing={"numStartups": 3, ONBOARDING_FLAG: False}
+    )
+
+    assert onboarding == {"numStartups": 3, ONBOARDING_FLAG: True}
+
+
+def test_the_healthcheck_needs_nothing_the_image_does_not_carry():
+    """Compose must report the container healthy for the right reason (story 21): the slim
+    image has no curl, so the check is Python's standard library asking the health endpoint."""
+    check = service(DEMO_SERVICE)["healthcheck"]["test"]
+
+    assert check[0] == "CMD"
+    assert check[1] in TOOLS_THE_IMAGE_CARRIES, f"{check[1]} is not in the image"
+    assert "curl" not in " ".join(check)
+    assert f"http://localhost:{RECEIVER_PORT}/health" in " ".join(check)
+
+
+# The image, asked directly (opt-in, like the rest of TestAStackThatIsUp).
+
+NODE_READS_THE_OS_TRUST_STORE = (22, 15)
+"""The first Node on which Claude Code reads the operating system trust store."""
+
+
+@needs_the_stack_up
+class TestTheImageCarriesOnlyWhatARunNeeds:
+    """With `docker compose up -d` done, the claims the default run reads off the Dockerfile."""
+
+    @pytest.mark.parametrize("tool", ESCALATION_TOOLS)
+    def test_no_escalation_tool_is_on_a_runs_path(self, tool):
+        found = compose("exec", "-T", DEMO_SERVICE, "sh", "-c", f"command -v {tool}")
+
+        assert found.returncode != 0, f"{tool} is in the container at {found.stdout.strip()}"
+
+    def test_there_is_no_docker_group_to_be_in(self):
+        group = compose("exec", "-T", DEMO_SERVICE, "getent", "group", "docker")
+
+        assert group.returncode != 0, group.stdout
+
+    def test_node_is_new_enough_to_read_the_os_trust_store(self):
+        version = compose("exec", "-T", DEMO_SERVICE, "node", "--version").stdout.strip()
+
+        assert (
+            tuple(int(part) for part in version.lstrip("v").split("."))
+            >= NODE_READS_THE_OS_TRUST_STORE
+        ), version
