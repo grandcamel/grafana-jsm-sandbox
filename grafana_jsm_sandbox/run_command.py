@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 
 from grafana_jsm_sandbox.notification import NOTIFICATION_FILENAME
+from grafana_jsm_sandbox.project import DEFAULT_PROJECT
 
 CLAUDE = "claude"
 """The Claude Code executable, on PATH on the laptop and in the container."""
@@ -47,16 +48,17 @@ not reach for one — the skill never needs one."""
 
 PROMPT = (
     f"Read the skill, then handle every Alert in {NOTIFICATION_FILENAME} as it says. "
-    "Finish with one line per Alert saying what changed in OPS."
+    "Finish with one line per Alert saying what changed in {project}."
 )
 
 
-def build_run_command(skill_directory: Path | str) -> list[str]:
+def build_run_command(skill_directory: Path | str, project: str = DEFAULT_PROJECT) -> list[str]:
     """The argv that starts one Run, to be executed in the Run's working directory.
 
     `skill_directory` is the directory mounted into the container that holds the
     skill; it is made absolute, because a Run's working directory is not this
-    process's and `--add-dir` is resolved from the Run's.
+    process's and `--add-dir` is resolved from the Run's. `project` is the key the
+    skill in that directory names, so the prompt does not contradict it.
     """
     skill_directory = Path(skill_directory).resolve()
     return [
@@ -77,7 +79,7 @@ def build_run_command(skill_directory: Path | str) -> list[str]:
             skill=skill_directory / SKILL_FILE,
             tools=", ".join(ALLOWED_TOOLS),
         ),
-        PROMPT,
+        PROMPT.format(project=project),
     ]
 
 

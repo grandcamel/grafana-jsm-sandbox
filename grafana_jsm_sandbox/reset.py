@@ -19,20 +19,33 @@ label at all, is a human's and is reported rather than touched.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-OPEN_INCIDENTS = "project = OPS AND issuetype = Incident AND statusCategory != Done"
-"""Everything a Run could still act on, whoever opened it."""
-
-STUCK_INCIDENTS = (
-    "project = OPS AND issuetype = Incident AND statusCategory = Done AND resolution = Unresolved"
+from grafana_jsm_sandbox.project import (
+    ALLOWED_PROJECTS_VARIABLE,
+    DEFAULT_PROJECT,
+    project_from_shell,
 )
-"""Done by status but still in the Incidents queue, which filters on resolution, with no
-transition left that could set one (ADR 0004). Only deleting them empties the queue."""
+
+
+def open_incidents(project: str) -> str:
+    """Everything a Run could still act on, whoever opened it."""
+    return f"project = {project} AND issuetype = Incident AND statusCategory != Done"
+
+
+def stuck_incidents(project: str) -> str:
+    """Done by status but still in the Incidents queue, which filters on resolution, with no
+    transition left that could set one (ADR 0004). Only deleting them empties the queue."""
+    return (
+        f"project = {project} AND issuetype = Incident"
+        " AND statusCategory = Done AND resolution = Unresolved"
+    )
+
 
 FINGERPRINT_PREFIX = "fp-"
 """What marks an Incident as a Run's: the label a Run keys it by (ADR 0004)."""
@@ -84,12 +97,16 @@ class Outcome:
         return not self.left and not self.skipped and not self.stuck
 
 
-def reset(jira_as: JiraAs | None = None, compose: Compose | None = None) -> Outcome:
-    """Empty the Incidents queue of every Run-created Incident, then start the traffic."""
+def reset(
+    jira_as: JiraAs | None = None,
+    compose: Compose | None = None,
+    project: str = DEFAULT_PROJECT,
+) -> Outcome:
+    """Empty `project`'s Incidents queue of every Run-created Incident, then start the traffic."""
     jira_as = run_jira_as if jira_as is None else jira_as
     compose = run_compose if compose is None else compose
     outcome = Outcome()
-    for issue in search(jira_as, OPEN_INCIDENTS):
+    for issue in search(jira_as, open_incidents(project)):
         key = issue["key"]
         if not any(label.startswith(FINGERPRINT_PREFIX) for label in issue["fields"]["labels"]):
             outcome.skipped.append(key)
@@ -97,7 +114,7 @@ def reset(jira_as: JiraAs | None = None, compose: Compose | None = None) -> Outc
             outcome.closed.append(key)
         else:
             outcome.left.append(key)
-    stuck = [issue["key"] for issue in search(jira_as, STUCK_INCIDENTS)]
+    stuck = [issue["key"] for issue in search(jira_as, stuck_incidents(project))]
     compose("start", TRAFFIC_SERVICE)
     return Outcome(outcome.closed, outcome.left, outcome.skipped, stuck, traffic_started=True)
 
@@ -132,10 +149,26 @@ def search(jira_as: JiraAs, jql: str) -> list[dict]:
     return json.loads(answer).get("issues", [])
 
 
+def jira_as_environment(project: str, shell: Mapping[str, str] | None = None) -> dict[str, str]:
+    """This shell's environment, with jira-as held to the one project.
+
+    jira-as takes `JIRA_ALLOWED_PROJECTS` over the settings file of whatever tree it
+    was started in, so the reset reaches the configured project from any directory
+    and no other project from this one.
+    """
+    shell = os.environ if shell is None else shell
+    return {**shell, ALLOWED_PROJECTS_VARIABLE: project}
+
+
 def run_jira_as(*arguments: str) -> str:
-    """The real `jira-as`, with the credential this shell holds."""
+    """The real `jira-as`, with the credential this shell holds, on the configured project."""
     answer = subprocess.run(
-        [JIRA_AS, *arguments], capture_output=True, text=True, timeout=120, check=False
+        [JIRA_AS, *arguments],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+        env=jira_as_environment(project_from_shell()),
     )
     if answer.returncode != 0:
         raise RuntimeError(f"{JIRA_AS} {' '.join(arguments)} failed: {answer.stderr.strip()}")
@@ -152,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv:
         print("usage: python3 -m grafana_jsm_sandbox.reset", file=sys.stderr)
         return 2
-    outcome = reset()
+    outcome = reset(project=project_from_shell())
     for key in outcome.closed:
         print(f"{key}: completed with resolution {RESOLUTION} and closed")
     for key in outcome.left:

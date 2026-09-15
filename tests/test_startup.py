@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from grafana_jsm_sandbox.__main__ import Settings, main
+from grafana_jsm_sandbox.__main__ import Settings, main, skill_directory_for
+from grafana_jsm_sandbox.project import PROJECT_VARIABLE
 from grafana_jsm_sandbox.run_command import SKILL_FILE
 from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE
 
@@ -43,6 +44,30 @@ def test_the_skill_directory_defaults_to_the_one_in_this_repo():
     settings = Settings.from_environment(COMPLETE)
 
     assert (settings.skill_directory / SKILL_FILE).is_file()
+
+
+def test_the_runs_act_on_the_skills_own_project_unless_told_otherwise(tmp_path):
+    """The committed Skill is what a Run reads when the project is the one it names."""
+    settings = Settings.from_environment(COMPLETE)
+
+    assert settings.project == "OPS"
+    assert skill_directory_for(settings, tmp_path) == settings.skill_directory
+
+
+def test_another_project_gets_the_skill_rendered_for_it_once_at_startup(tmp_path):
+    settings = Settings.from_environment(complete_but(JIRA_PROJECT="SIEM"))
+    skill_directory = skill_directory_for(settings, tmp_path)
+
+    assert settings.project == "SIEM"
+    assert skill_directory != settings.skill_directory
+    assert skill_directory.is_relative_to(tmp_path)
+    assert "| Project | `SIEM` |" in (skill_directory / SKILL_FILE).read_text()
+
+
+def test_startup_stops_on_a_project_that_is_not_a_jira_key(capsys):
+    assert main([], environment=complete_but(JIRA_PROJECT="siem staging")) == 1
+
+    assert PROJECT_VARIABLE in capsys.readouterr().err
 
 
 def test_the_receiver_listens_where_the_container_expects_it_to():

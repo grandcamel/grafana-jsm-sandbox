@@ -14,7 +14,14 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from grafana_jsm_sandbox.reset import OPEN_INCIDENTS, RESOLUTION, STUCK_INCIDENTS, reset
+from grafana_jsm_sandbox.project import ALLOWED_PROJECTS_VARIABLE
+from grafana_jsm_sandbox.reset import (
+    RESOLUTION,
+    jira_as_environment,
+    open_incidents,
+    reset,
+    stuck_incidents,
+)
 
 WORKFLOW = {
     "Open": {"11": "Work in progress", "21": "Completed", "31": "Canceled"},
@@ -45,13 +52,14 @@ class FakeOps:
 
     incidents: dict[str, FakeIncident]
     calls: list[tuple[str, ...]] = field(default_factory=list)
+    project: str = "OPS"
 
     def __call__(self, *arguments: str) -> str:
         self.calls.append(arguments)
         match arguments:
             case ("search", "jql", jql, *_):
-                assert jql in (OPEN_INCIDENTS, STUCK_INCIDENTS)
-                keys = self._open() if jql == OPEN_INCIDENTS else self._stuck()
+                assert jql in (open_incidents(self.project), stuck_incidents(self.project))
+                keys = self._open() if jql == open_incidents(self.project) else self._stuck()
                 return json.dumps({"issues": [self._issue(key) for key in keys]})
             case ("lifecycle", "transitions", key, *_):
                 return json.dumps(
@@ -213,3 +221,26 @@ def test_the_queue_is_cleared_before_the_traffic_moves():
     reset(jira_as=jira_as, compose=compose)
 
     assert order[-1] == "compose" and order.count("compose") == 1
+
+
+def test_the_reset_empties_the_project_it_was_configured_for(compose):
+    """A demo against another site's project: the same reset, one setting on."""
+    siem = FakeOps({"SIEM-3": FakeIncident("Open", ["fp-87e2f184874a3b71"])}, project="SIEM")
+
+    outcome = reset(siem, compose, project="SIEM")
+
+    assert outcome.closed == ["SIEM-3"]
+    assert all(
+        "project = SIEM AND" in call[2] for call in siem.calls if call[:2] == ("search", "jql")
+    )
+
+
+def test_the_real_jira_as_is_held_to_the_one_project_whatever_the_shell_allows():
+    """jira-as reads its allowlist from the environment over any settings file, so the
+    reset run from a tree that allows OPS still reaches SIEM when SIEM is the project,
+    and reaches nothing else either way."""
+    environment = jira_as_environment("SIEM", {"PATH": "/usr/bin", "JIRA_API_TOKEN": "t"})
+
+    assert environment[ALLOWED_PROJECTS_VARIABLE] == "SIEM"
+    assert environment["PATH"] == "/usr/bin"
+    assert environment["JIRA_API_TOKEN"] == "t"

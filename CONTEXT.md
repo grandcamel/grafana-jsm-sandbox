@@ -38,7 +38,9 @@ _Avoid_: harness, agent, session, job
 
 **Skill**:
 The one file in this repo, copied into the image, that tells a Run the OPS facts and how to
-act on an Alert. A Run reads it and nothing else instructs it.
+act on an Alert. A Run reads it and nothing else instructs it. For a project with another key
+the Receiver renders a copy of it with the key rewritten, once at startup, and a Run reads that
+(ADR 0006).
 _Avoid_: prompt, playbook, instructions, runbook
 
 **Forwarder**:

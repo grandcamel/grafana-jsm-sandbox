@@ -22,7 +22,12 @@ does; right column is what the audience believes.
 
 `<your-site>` and `<queue-id>` are yours to fill in: open the OPS project's **Queues**, click
 **Incidents**, and the address bar has both. The queue id is that queue's own and differs on
-every site, so bookmark the address the day before rather than typing it live.
+every site, so bookmark the address the day before rather than typing it live. A site whose
+project is not called `OPS` is one line in `.env`, `JIRA_PROJECT=<key>` (ADR 0006): the
+container, the reset and the end-to-end check all read it from there, the queue address names
+that key, and so does every `OPS` in this runbook's commands. Your own `jira-as` commands from
+this shell are still held to `OPS` by the repo's settings file unless you also
+`export JIRA_ALLOWED_PROJECTS=<key>`.
 
 Reload the queue and the Grafana list by hand when the log says a Run has finished. Neither
 refreshes fast enough on its own to be trusted during the demo.
