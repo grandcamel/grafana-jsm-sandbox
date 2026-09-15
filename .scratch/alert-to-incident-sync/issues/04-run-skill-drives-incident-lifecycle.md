@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — Forwarder holds the Jira token
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [x] Three canned Notification fixtures exist: firing, repeat firing with a different value, resolved, all sharing one Fingerprint
 - [x] The skill file states the OPS facts, the label format, the match JQL, the field mapping, the lifecycle rule, and the rule to read transition ids by name from the issue, in terms of jira-as invocations only
@@ -97,6 +97,10 @@ reads a blank field as a bug.
   nothing to compare against.
 
 ### Still open
+
+Everything this ticket asked to be built is built and committed; the status is `ready-for-human`
+rather than `done` for the one criterion below that no agent can finish — deleting an issue is the
+user's call, and `Canceled` leaves no other way out (ADR 0004).
 
 - **Six test Incidents are stuck in the Incidents queue**: OPS-1 through OPS-6, from before the
   `Canceled` trap was understood. They are `Canceled` or `Closed` with no resolution and no

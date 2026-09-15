@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] Forwarder binds to loopback only and takes its upstream host, email and token from configuration, never from the request
 - [x] A request whose basic-auth password equals the active sentinel is forwarded with the real email and token in the Authorization header; the sentinel does not reach upstream

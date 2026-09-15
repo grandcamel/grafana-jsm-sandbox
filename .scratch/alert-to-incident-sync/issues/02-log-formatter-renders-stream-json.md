@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] A pure function maps one stream-json event to zero or more text lines
 - [x] Table-driven tests cover assistant text, a Bash tool call, a tool result longer than the trim limit, a permission-denied system event, and a final result event

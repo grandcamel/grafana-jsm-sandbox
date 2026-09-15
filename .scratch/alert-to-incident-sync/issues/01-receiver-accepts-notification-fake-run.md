@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] POST of a valid Notification returns 202 before the Run starts, and the injected spawner is called once with a working directory containing the Notification as JSON
 - [x] A body that is not JSON, or lacks an alerts array, or has an alert without fingerprint and status, returns 400 and no spawn occurs
