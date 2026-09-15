@@ -17,6 +17,7 @@ from grafana_jsm_sandbox.project import (
     PROJECT_VARIABLE,
     InvalidProjectKey,
     project_from_environment,
+    project_from_shell,
     render_skill,
 )
 from grafana_jsm_sandbox.run_command import SKILL_FILE
@@ -89,3 +90,31 @@ def test_the_key_a_run_types_is_the_key_that_was_configured(tmp_path):
     assert (rendered / "incident-sync" / "SKILL.md").read_text() == (
         "project = SIEM, OPSEC, SIEM-12, `SIEM`\n"
     )
+
+
+def test_the_laptop_side_tools_read_the_project_the_container_was_started_for(tmp_path):
+    """The reset and the end-to-end check act on what `.env` names, which is what the
+    container read, unless the shell says otherwise; so the key is set in one place."""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "# the demo's credentials\nJIRA_SITE_URL=https://x.atlassian.net\nJIRA_PROJECT=SIEM\n"
+    )
+
+    assert project_from_shell({}, env_file) == "SIEM"
+    assert project_from_shell({PROJECT_VARIABLE: "OPS"}, env_file) == "OPS"
+    assert project_from_shell({}, tmp_path / "no-such-file") == DEFAULT_PROJECT
+
+
+def test_a_commented_out_project_in_the_env_file_is_the_default(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("# JIRA_PROJECT=SIEM\nJIRA_PROJECT = \n")
+
+    assert project_from_shell({}, env_file) == DEFAULT_PROJECT
+
+
+def test_the_env_files_project_is_held_to_the_same_shape(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("JIRA_PROJECT=siem\n")
+
+    with pytest.raises(InvalidProjectKey):
+        project_from_shell({}, env_file)

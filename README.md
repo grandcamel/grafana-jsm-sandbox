@@ -189,7 +189,7 @@ missing at once, so a half-filled env file is fixed in one pass rather than thre
 | `JIRA_EMAIL` | The account the Forwarder acts as |
 | `JIRA_API_TOKEN` | The real token. It never reaches a Run |
 | `CLAUDE_CODE_OAUTH_TOKEN` | What a Run authenticates with. The one real credential it holds |
-| `JIRA_PROJECT` | The project the Runs act on. `OPS`, the one the Skill is written for; any other key has the Skill rendered for it at startup |
+| `JIRA_PROJECT` | The project the Runs act on. `OPS`, the one the Skill is written for; any other key has the Skill rendered for it at startup, and the reset and the end-to-end check read it from `.env` too (ADR 0006) |
 | `RECEIVER_HOST` / `RECEIVER_PORT` | Where the Receiver listens. `0.0.0.0` and `8080` |
 | `RUNS_DIRECTORY` | Where each Run's working directory goes. `runs` |
 | `SKILL_DIRECTORY` | The skill a Run reads. This repo's `skill` |

@@ -29,7 +29,7 @@ from pathlib import Path
 from grafana_jsm_sandbox.project import (
     ALLOWED_PROJECTS_VARIABLE,
     DEFAULT_PROJECT,
-    project_from_environment,
+    project_from_shell,
 )
 
 
@@ -168,7 +168,7 @@ def run_jira_as(*arguments: str) -> str:
         text=True,
         timeout=120,
         check=False,
-        env=jira_as_environment(project_from_environment()),
+        env=jira_as_environment(project_from_shell()),
     )
     if answer.returncode != 0:
         raise RuntimeError(f"{JIRA_AS} {' '.join(arguments)} failed: {answer.stderr.strip()}")
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv:
         print("usage: python3 -m grafana_jsm_sandbox.reset", file=sys.stderr)
         return 2
-    outcome = reset(project=project_from_environment())
+    outcome = reset(project=project_from_shell())
     for key in outcome.closed:
         print(f"{key}: completed with resolution {RESOLUTION} and closed")
     for key in outcome.left:

@@ -1,11 +1,12 @@
-"""The one setting that names the Jira project a Run acts on.
+"""The one setting that names the Jira project a Run acts on (ADR 0006).
 
 The Skill is written for one project key, in full, because every invocation in
 it must be runnable as written and readable off a screen during the demo. A
 demo against another site's project, on a laptop that is not the one the Skill
-was written on, sets `JIRA_PROJECT` and nothing else: the reset and the
-end-to-end check read it, and the Receiver renders the Skill for it once at
-startup into a copy the Runs read instead of the committed one.
+was written on, sets `JIRA_PROJECT` in `.env` and nothing else: the container
+reads it there and renders the Skill for it once at startup into a copy the
+Runs read instead of the committed one, and the reset and the end-to-end check
+read the same file when the shell does not say otherwise.
 """
 
 from __future__ import annotations
@@ -26,6 +27,10 @@ ALLOWED_PROJECTS_VARIABLE = "JIRA_ALLOWED_PROJECTS"
 """What jira-as reads as its project allowlist, over whatever a settings file says. Set to
 the one configured project wherever this repo runs jira-as, so nothing here can reach
 another project by mistake, whichever tree it was started in."""
+
+ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+"""What compose hands the container, and so where the project the container read is written
+down on the laptop. Git never takes it."""
 
 PROJECT_KEY = re.compile(r"[A-Z][A-Z0-9_]*")
 """Jira's shape for a project key: uppercase, a letter first. Anything else would fail
@@ -48,6 +53,33 @@ def project_from_environment(environment: Mapping[str, str] | None = None) -> st
             "(uppercase letters, digits and underscores, starting with a letter)"
         )
     return key
+
+
+def project_from_shell(shell: Mapping[str, str] | None = None, env_file: Path = ENV_FILE) -> str:
+    """The project the laptop-side tools act on: the shell's own `JIRA_PROJECT`, else the
+    one in `.env` that the container was started with, else the Skill's own.
+
+    So the key is set in one place, and the reset cannot empty one project's queue while
+    the Runs fill another's.
+    """
+    shell = os.environ if shell is None else shell
+    if shell.get(PROJECT_VARIABLE, "").strip():
+        return project_from_environment(shell)
+    return project_from_environment(_env_file_variables(env_file))
+
+
+def _env_file_variables(env_file: Path) -> dict[str, str]:
+    """`.env` read the way compose reads it: `NAME=value` lines, comments and blanks skipped."""
+    if not env_file.is_file():
+        return {}
+    variables = {}
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        variables[name.strip()] = value.strip()
+    return variables
 
 
 def render_skill(source: Path, project: str, destination: Path) -> Path:
