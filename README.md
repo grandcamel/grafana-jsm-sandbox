@@ -159,9 +159,10 @@ python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 3
 
 ## Running the demo in the container
 
-`docker compose up` is the whole demo: the LGTM stack the Alert will fire from, and one demo
-container whose main process is the Receiver, on one network so that Grafana's contact point can
-name `demo` by service name.
+`docker compose up` is the whole demo: the LGTM stack the Alert fires from, one demo container
+whose main process is the Receiver, the rolldice app the Alert is about, and the synthetic
+traffic whose absence fires it — on one network so that Grafana's contact point can name `demo`
+by service name.
 
 ```bash
 cp .env.example .env     # then fill in the four credentials
@@ -184,6 +185,52 @@ python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 3
 ```
 
 Grafana is on the laptop at <http://localhost:3000>, anonymous admin, no login form.
+
+### Firing the Alert for real
+
+Grafana's contact point, notification policy and alert rule are provisioned from
+[`grafana/provisioning/alerting`](grafana/provisioning/alerting), mounted read-only into the LGTM
+container. The other repo is a reference only; nothing there is edited. Grafana reads the
+directory once, at startup, so a change to any of the three files is `docker compose restart lgtm`.
+
+| File | What it provisions |
+| --- | --- |
+| `contact-point.yaml` | `demo-receiver`, a webhook at `http://demo:8080/notification` |
+| `notification-policy.yaml` | One route, everything to `demo-receiver`: group wait 10s, repeat interval **1m** |
+| `alert-rule.yaml` | `rolldice request rate is zero`: evaluated every 10s, Firing after 30s at zero |
+
+The rule watches `http_server_duration_milliseconds_count{service_name="rolldice"}`, which is
+what the Python auto-instrumentation in the rolldice image actually exports to Prometheus — asked
+of Prometheus with rolldice under traffic, not guessed. The rolldice app keeps exporting the
+counter after its traffic stops, so the rate reads zero rather than going missing, and no-data is
+deliberately Normal so that a rolldice that has not yet served a request starts no Run.
+
+**The repeat interval override is the one thing not to lose.** Grafana's default is four hours,
+which means the Alert fires once and the repeat Firings that add trend comments never arrive
+during a demo. `repeat_interval: 1m` in `notification-policy.yaml` is the override, with the group
+wait and group interval at 10s for the same reason.
+
+The `traffic` service sends rolldice one request a second. The presenter's one action, and its
+undo:
+
+```bash
+docker compose stop traffic
+```
+
+```bash
+docker compose start traffic
+```
+
+Measured on this laptop, from the container log: the Firing Notification arrives 70s after the
+stop, the first repeat 70s after that, and the Resolved 20s after traffic is started again. The
+whole lifecycle — Incident created, moved to Work in progress with a trend comment, Completed
+with a resolution — took 3m30s, three Runs, $0.47.
+
+The canned fixtures under `fixtures/` are the three Notifications Grafana posted during that
+rehearsal, so the replay script drives the same Alert, Fingerprint included. That is deliberate:
+if the live Alert has already opened an Incident when the fallback is needed, the replayed Firing
+comments on it rather than opening a second one, which is the demo working. It also means the
+replay and the live Alert must not be run at the same time.
 
 Everything a Run does arrives in `docker compose logs -f demo` through the formatter — its own
 text, every `jira-as` command in full, and every denial. To look around inside, the entrypoint
@@ -208,9 +255,11 @@ docker compose run --rm demo sh
 | `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
 | `Dockerfile` | The demo image: Claude Code, `jira-as`, the package and the skill |
 | `docker/entrypoint.sh` | What the container starts: onboarding pre-accepted, then the Receiver |
-| `docker-compose.yml` | The LGTM stack and the demo container, on one network |
+| `docker-compose.yml` | The LGTM stack, the demo container, rolldice and its traffic, on one network |
+| `docker/rolldice/` | The rolldice example app, copied from the otel-lgtm examples, auto-instrumented |
+| `grafana/provisioning/alerting/` | The contact point, the notification policy and the alert rule Grafana loads |
 | `.env.example` | Every variable the container needs, with placeholders |
-| `fixtures/notification-*.json` | The canned Notification sequence: firing, repeat, resolved |
+| `fixtures/notification-*.json` | The canned Notification sequence as Grafana really posted it: firing, repeat, resolved |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
 | `fixtures/run-transcript-repeat-firing.jsonl` | A recorded Run that commented a trend on a real Incident |
 | `tests/` | pytest, driving a real Receiver and Forwarder over real HTTP on ephemeral ports |
@@ -243,7 +292,20 @@ as a user who is not root with the two executables a Run is allowed on its PATH.
 DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py
 ```
 
+The same flag runs the Grafana checks, which ask the running Grafana what it was provisioned with
+rather than reading the files back — a typo in a provisioning file makes Grafana skip it and say
+so only in its own log. They check the contact point aims at the Receiver on the compose network,
+the policy repeats every minute, the rule evaluates every ten seconds and fires after thirty, the
+rule's own query matches a series rolldice really exports, the rule is Normal while traffic flows,
+and the canned fixtures describe the Alert Grafana is provisioned to send:
+
+```bash
+DEMO_CONTAINER=1 python3 -m pytest tests/test_grafana.py
+```
+
 Everything else in `tests/test_container.py` runs by default and builds nothing: it reads the
 committed `Dockerfile`, `docker-compose.yml` and `.env.example` and drives them against the code
 they configure — the example is fed to the real configuration reader, its values through the real
-redaction, and the ignore rules through real `git check-ignore`.
+redaction, and the ignore rules through real `git check-ignore`. It also holds compose to the
+three things the live Alert depends on: every service on the one network, this repo's
+provisioning directory mounted where Grafana reads it, and a stopped `traffic` staying stopped.

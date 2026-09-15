@@ -1,10 +1,12 @@
 """The canned Notification sequence: a Firing, a repeat Firing, and a Resolved.
 
 These three fixtures are the demo's fallback when Grafana is uncooperative, and
-the input to the end-to-end check. They only mean anything as a sequence: one
-Alert, one Fingerprint, seen three times. A fixture edited out of step with the
-other two breaks a demo rather than a test, so the sequence is what is asserted
-here.
+the input to the end-to-end check. They are what Grafana actually posted during
+ticket 07's rehearsal, so the Fingerprint is the real Alert's and the replay
+drives the same Incident the live stack would. They only mean anything as a
+sequence: one Alert, one Fingerprint, seen three times. A fixture edited out of
+step with the other two breaks a demo rather than a test, so the sequence is
+what is asserted here.
 """
 
 from __future__ import annotations
@@ -62,11 +64,10 @@ def test_the_sequence_is_firing_then_repeat_firing_then_resolved(sequence):
     ]
 
 
-def test_the_repeat_firing_reports_a_different_value(sequence):
+def test_a_repeat_firing_is_the_same_notification_sent_again(sequence):
+    """Grafana repeats a Firing verbatim, values included; the trend comment says so."""
     first, repeat, _ = sequence
-    assert only_alert(repeat)["values"] != only_alert(first)["values"], (
-        "the repeat exists to give the trend comment a change to report"
-    )
+    assert repeat == first
 
 
 def test_the_alert_keeps_one_start_and_ends_only_when_resolved(sequence):

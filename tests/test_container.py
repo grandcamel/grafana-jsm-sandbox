@@ -14,10 +14,8 @@ end-to-end check, because they cost a build and a demo:
 
 from __future__ import annotations
 
-import os
 import subprocess
 import urllib.request
-from pathlib import Path
 
 import pytest
 import yaml
@@ -33,9 +31,7 @@ from grafana_jsm_sandbox.__main__ import (
 from grafana_jsm_sandbox.forwarder import ENVIRONMENT_VARIABLES
 from grafana_jsm_sandbox.log_formatter import redact
 from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE
-
-REPOSITORY = Path(__file__).resolve().parent.parent
-"""The build context, the git working tree, and where every file read here lives."""
+from tests.conftest import REPOSITORY, compose, needs_the_stack_up
 
 COMPOSE_FILE = REPOSITORY / "docker-compose.yml"
 DOCKERFILE = REPOSITORY / "Dockerfile"
@@ -55,14 +51,20 @@ DEMO_SERVICE = "demo"
 LGTM_SERVICE = "lgtm"
 """The published Grafana stack the Alert fires from."""
 
+TRAFFIC_SERVICE = "traffic"
+"""The synthetic traffic. Stopping it fires the Alert; starting it resolves it (story 55)."""
+
+PROVISIONING = REPOSITORY / "grafana" / "provisioning" / "alerting"
+"""The contact point, the notification policy and the alert rule, in this repo (story 53)."""
+
+GRAFANA_ALERTING_PROVISIONING = "/otel-lgtm/grafana/conf/provisioning/alerting"
+"""Where Grafana in the published image reads alerting provisioning from."""
+
 GRAFANA_PORT = 3000
 """Where the presenter watches the Alert fire, on the laptop."""
 
 RECEIVER_PORT = 8080
 """What the contact point names and what the replay script posts at by default."""
-
-CONTAINER_VARIABLE = "DEMO_CONTAINER"
-"""Set it to anything and the checks that need the stack up run too."""
 
 CREDENTIALS = (*ENVIRONMENT_VARIABLES.values(), ANTHROPIC_TOKEN_VARIABLE)
 """Every variable the process refuses to start without."""
@@ -190,14 +192,35 @@ def test_the_receiver_listens_where_the_published_port_leads():
     assert PORT_VARIABLE not in service(DEMO_SERVICE).get("environment", {})
 
 
-def test_the_lgtm_stack_and_the_demo_share_one_network():
-    """The contact point in ticket 07 names the demo service, so both must be on it."""
+def test_every_service_shares_the_one_network():
+    """The contact point names `demo`, traffic names `rolldice`, rolldice names `lgtm`."""
     networks = COMPOSE["networks"]
     assert len(networks) == 1
 
     only = next(iter(networks))
-    assert _as_list(service(LGTM_SERVICE)["networks"]) == [only]
-    assert _as_list(service(DEMO_SERVICE)["networks"]) == [only]
+    for name, definition in COMPOSE["services"].items():
+        assert _as_list(definition.get("networks", [])) == [only], f"{name} is off the network"
+
+
+def test_grafana_reads_its_alerting_provisioning_from_this_repo():
+    """Story 53: the other repo is a reference, and this one mounts its own files over the sample."""
+    mounts = [str(volume).split(":") for volume in service(LGTM_SERVICE).get("volumes", [])]
+    alerting = [parts for parts in mounts if parts[1] == GRAFANA_ALERTING_PROVISIONING]
+
+    assert len(alerting) == 1, f"{LGTM_SERVICE} mounts {mounts}"
+    source, _, *options = alerting[0]
+    assert (REPOSITORY / source).resolve() == PROVISIONING
+    assert options == ["ro"], "Grafana reads the files; it does not get to change them"
+    assert {path.name for path in PROVISIONING.glob("*.yaml")} == {
+        "contact-point.yaml",
+        "notification-policy.yaml",
+        "alert-rule.yaml",
+    }
+
+
+def test_stopped_traffic_stays_stopped():
+    """The presenter's one action is `docker compose stop traffic`; nothing may undo it."""
+    assert "restart" not in service(TRAFFIC_SERVICE)
 
 
 def test_the_container_ends_as_a_user_who_is_not_root():
@@ -221,7 +244,7 @@ def test_the_image_is_built_holding_no_credential():
             assert variable not in line, f"{variable} is named in the Dockerfile"
 
 
-@pytest.mark.skipif(not os.environ.get(CONTAINER_VARIABLE), reason=f"set {CONTAINER_VARIABLE}")
+@needs_the_stack_up
 class TestAStackThatIsUp:
     """With `docker compose up -d` already done, the two things the demo depends on."""
 
@@ -230,20 +253,25 @@ class TestAStackThatIsUp:
 
     def test_the_health_endpoint_answers_from_inside_the_network(self):
         """What Grafana's contact point will do, from the container that will do it."""
-        answered = _compose_exec(
-            LGTM_SERVICE, "curl", "-fsS", f"http://{DEMO_SERVICE}:{RECEIVER_PORT}/health"
+        answered = compose(
+            "exec",
+            "-T",
+            LGTM_SERVICE,
+            "curl",
+            "-fsS",
+            f"http://{DEMO_SERVICE}:{RECEIVER_PORT}/health",
         )
 
         assert answered.returncode == 0, answered.stderr
 
     def test_the_receiver_runs_as_a_user_who_is_not_root(self):
-        who = _compose_exec(DEMO_SERVICE, "id", "-u")
+        who = compose("exec", "-T", DEMO_SERVICE, "id", "-u")
 
         assert who.stdout.strip() != "0"
 
     def test_a_run_would_find_the_tools_it_is_allowed_to_use(self):
         for tool in ("claude", "jira-as"):
-            found = _compose_exec(DEMO_SERVICE, "sh", "-c", f"command -v {tool}")
+            found = compose("exec", "-T", DEMO_SERVICE, "sh", "-c", f"command -v {tool}")
             assert found.returncode == 0, f"{tool} is not on the Run's PATH"
 
 
@@ -254,13 +282,3 @@ def _as_list(value) -> list[str]:
 def _get(url: str) -> int:
     with urllib.request.urlopen(url, timeout=5) as response:
         return response.status
-
-
-def _compose_exec(service_name: str, *command: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["docker", "compose", "exec", "-T", service_name, *command],
-        cwd=REPOSITORY,
-        capture_output=True,
-        text=True,
-        check=False,
-    )

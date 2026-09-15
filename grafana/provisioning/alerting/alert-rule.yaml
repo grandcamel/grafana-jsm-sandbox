@@ -1,0 +1,68 @@
+# The alert rule: the rolldice request rate has been zero for thirty seconds,
+# evaluated every ten (story 54). The metric is the one the Python
+# auto-instrumentation in this image actually exports — asked of Prometheus
+# with rolldice under traffic, not guessed — and it keeps being exported after
+# the traffic stops, so the rate reads zero rather than going missing.
+#
+# The labels are what the skill's field mapping reads: `severity` becomes the
+# Severity and Urgency fields, `service` the Component. `instance` arrives from
+# the series itself, and `alertname` and `grafana_folder` from Grafana.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: rolldice
+    folder: demo
+    interval: 10s
+    rules:
+      - uid: rolldice-rate-zero
+        title: rolldice request rate is zero
+        condition: B
+        data:
+          # A: requests per second at rolldice, per instance, over a window of four of
+          # its five-second exports. Shorter would risk a window with one sample and no
+          # rate at all; longer means the rate reads zero that much later than the
+          # traffic stopped, and the thirty seconds below start counting from there.
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 60
+              to: 0
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum by (instance) (rate(http_server_duration_milliseconds_count{service_name="rolldice"}[20s]))
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          # B: that rate is zero. Firing once it has been for thirty seconds.
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params:
+                      - 0.01
+        for: 30s
+        # Before rolldice has served its first request there is no series at all.
+        # That is not an Incident, and a Notification about it would start a Run,
+        # so both no-data and a query error stay Normal.
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: critical
+          service: rolldice
+        annotations:
+          summary: rolldice is receiving no traffic
+          description: The rolldice request rate has been zero for thirty seconds.
+        isPaused: false
