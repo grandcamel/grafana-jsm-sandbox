@@ -675,3 +675,260 @@ class TestTheTrustStoreOfAStackThatIsUp:
             pytest.skip(f"{EXTRA_CA_ARGUMENT} names a certificate; it should be in the bundle")
 
         assert trust_store["installed"] == []
+
+
+# --- The demo container runs the way Anthropic's deployment guide describes (ticket 03) ---
+
+TEMP_DIRECTORY = "/tmp"
+"""Where Claude Code keeps a Run's sockets and task files, and Python its temporary files."""
+
+NO_NEW_PRIVILEGES = "no-new-privileges:true"
+"""The security option under which no process in the container gains a privilege at exec."""
+
+CAPABILITY_SETS = ("CapInh", "CapPrm", "CapEff", "CapBnd")
+"""The four masks /proc/self/status prints; the bounding set is the one nothing can grow back."""
+
+NO_CAPABILITIES = "0000000000000000"
+"""An empty capability mask, as /proc/self/status prints one."""
+
+APPLICATION_DIRECTORY = "/app"
+"""The Run user's own directory in the image. Only a read-only root can refuse it a write."""
+
+
+def run_user() -> str:
+    """The account the Dockerfile's last USER names: the Receiver's, and so every Run's."""
+    users = [
+        line.split(maxsplit=1)[1] for line in dockerfile_instructions() if line.startswith("USER ")
+    ]
+    return users[-1]
+
+
+def useradd_arguments() -> list[str]:
+    """What the Dockerfile's useradd was given for the user the container ends as."""
+    for instruction in run_instructions():
+        for command in re.split(r"&&|;", instruction[len("RUN ") :]):
+            words = command.split()
+            if words[:1] == ["useradd"] and words[-1] == run_user():
+                return words[1:]
+    raise AssertionError(f"{run_user()} is not created by a useradd in the Dockerfile")
+
+
+def run_user_id() -> int:
+    arguments = useradd_arguments()
+    return int(arguments[arguments.index("--uid") + 1])
+
+
+def run_user_home() -> str:
+    """HOME for the Receiver and, through the account, for a Run that is handed no HOME: the
+    entrypoint writes the onboarding flag there, Claude Code its configuration and Transcripts."""
+    arguments = useradd_arguments()
+    assert "--create-home" in arguments, "the home is not made by useradd"
+    assert not {"--home-dir", "-d"} & set(arguments), "the home is not useradd's default"
+    return f"/home/{run_user()}"
+
+
+def runs_directory() -> str:
+    """The parent of every Run's working directory, as the image tells the Receiver."""
+    return environment_set_by(DOCKERFILE)[RUNS_DIRECTORY_VARIABLE][1]
+
+
+def scratch_directories() -> tuple[str, str, str]:
+    """Everything a container writes across three Runs, as `docker diff` lists it (story 19)."""
+    return (TEMP_DIRECTORY, runs_directory(), run_user_home())
+
+
+def tmpfs_mounts(name: str) -> dict[str, dict[str, str]]:
+    """A service's tmpfs mounts: each path, with its mount options as a dict."""
+    mounts: dict[str, dict[str, str]] = {}
+    for entry in _as_list(service(name).get("tmpfs", [])):
+        path, _, options = str(entry).partition(":")
+        mounts[path] = {}
+        for option in filter(None, options.split(",")):
+            key, _, value = option.partition("=")
+            mounts[path][key] = value
+    return mounts
+
+
+def memory_in_bytes(limit) -> int:
+    """A compose memory limit (`2g`, `512m`, `1024`) in bytes, binary multiples as compose reads it."""
+    if isinstance(limit, int):
+        return limit
+    match = re.fullmatch(r"(\d+)([bkmg]?)b?", str(limit).lower())
+    assert match, f"{limit!r} is not a memory limit"
+    return int(match[1]) * 1024 ** "bkmg".index(match[2] or "b")
+
+
+def test_the_demo_drops_every_capability():
+    """The guide's first flag (story 10). The Receiver binds an unprivileged port and needs none."""
+    assert _as_list(service(DEMO_SERVICE)["cap_drop"]) == ["ALL"]
+
+
+def test_no_process_in_the_demo_gains_a_privilege_at_exec():
+    assert NO_NEW_PRIVILEGES in _as_list(service(DEMO_SERVICE)["security_opt"])
+
+
+def test_the_demo_s_root_filesystem_is_read_only():
+    assert service(DEMO_SERVICE)["read_only"] is True
+
+
+def test_exactly_the_three_scratch_directories_are_writable_and_none_outlives_the_container():
+    """The temp directory, the runs directory and the Run user's home, on tmpfs and nowhere
+    else (story 19). No volume either, so a restart starts clean."""
+    assert set(tmpfs_mounts(DEMO_SERVICE)) == set(scratch_directories())
+    assert "volumes" not in service(DEMO_SERVICE)
+
+
+def test_the_runs_directory_and_the_home_belong_to_the_run_user():
+    """A tmpfs is root's and world-writable unless told otherwise; these two are the user's own,
+    with the uid the Dockerfile gave the account and the group `--user-group` made for it."""
+    uid = str(run_user_id())
+    for directory in (runs_directory(), run_user_home()):
+        options = tmpfs_mounts(DEMO_SERVICE)[directory]
+        assert options.get("uid") == uid, f"{directory} is not the user's: {options}"
+        assert options.get("gid") == uid, f"{directory} is not the user's group's: {options}"
+        assert options.get("mode") == "0700", f"{directory} is not private: {options}"
+
+
+def test_every_scratch_directory_is_sized():
+    """A tmpfs is memory; unsized, each may grow to half the machine's (story 20)."""
+    for directory, options in tmpfs_mounts(DEMO_SERVICE).items():
+        assert re.fullmatch(r"\d+[kmg]", options.get("size", "")), f"{directory} is unsized"
+
+
+PEAK_TASKS_IN_A_LIFECYCLE = 24
+"""The most tasks (processes and threads) the container's cgroup held at any sample across the
+three Runs of the end-to-end check, run under the limits and sampled every 0.7s (ticket 03)."""
+
+PEAK_MEMORY_IN_A_LIFECYCLE = 227 * 1024**2
+"""The cgroup's peak memory across the same three Runs, as the kernel reported it."""
+
+
+def test_a_runaway_run_is_bounded_in_processes_memory_and_cpu():
+    """Sized for three Runs in a row on a laptop (story 20): each limit has headroom over the
+    measured peak, and `TestTheBoundaryOfAStackThatIsUp` reads what the kernel then enforces."""
+    demo = service(DEMO_SERVICE)
+
+    assert isinstance(demo["pids_limit"], int)
+    assert demo["pids_limit"] >= 4 * PEAK_TASKS_IN_A_LIFECYCLE
+    assert memory_in_bytes(demo["mem_limit"]) >= 4 * PEAK_MEMORY_IN_A_LIFECYCLE
+    assert float(demo["cpus"]) > 0
+
+
+# The kernel, asked directly (opt-in, like the rest of TestAStackThatIsUp).
+
+PROBED_DIRECTORIES = (APPLICATION_DIRECTORY, *scratch_directories())
+"""One the user owns on the root filesystem, and the three scratch directories."""
+
+ASK_THE_KERNEL = f"""\
+import json, os
+def probe(directory):
+    path = os.path.join(directory, "write-probe-%d" % os.getpid())
+    try:
+        open(path, "w").close()
+        os.remove(path)
+        return "accepted"
+    except OSError as error:
+        return error.strerror
+def first(*paths):
+    for path in paths:
+        try:
+            return open(path).read().strip()
+        except OSError:
+            continue
+status = {{}}
+for line in open("/proc/self/status"):
+    name, separator, value = line.partition(":")
+    if separator:
+        status[name] = value.strip()
+quota = first("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+period = first("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+print(json.dumps({{
+    "uid": os.getuid(),
+    "capabilities": {{name: status[name] for name in {CAPABILITY_SETS!r}}},
+    "no_new_privs": status.get("NoNewPrivs"),
+    "writes": {{directory: probe(directory) for directory in {PROBED_DIRECTORIES!r}}},
+    "pids_max": first("/sys/fs/cgroup/pids.max", "/sys/fs/cgroup/pids/pids.max"),
+    "memory_max": first("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+    "cpu_max": first("/sys/fs/cgroup/cpu.max") or (quota and period and quota + " " + period),
+}}))
+"""
+"""What the running container's kernel says: who the process is, its four capability masks,
+whether it can gain a privilege at exec, which directories accept a write, and the process,
+memory and CPU limits its cgroup enforces (cgroup v2 first, v1 where that is what there is)."""
+
+UNLIMITED = "max"
+"""What cgroup v2 prints for a limit that is not set; v1 prints -1 or a number near 2**63."""
+
+
+def enforced_processes(kernel: dict) -> int | None:
+    value = kernel["pids_max"]
+    return None if value in (None, UNLIMITED) else int(value)
+
+
+def enforced_memory(kernel: dict) -> int | None:
+    value = kernel["memory_max"]
+    return None if value in (None, UNLIMITED) or int(value) >= 2**62 else int(value)
+
+
+def enforced_cpus(kernel: dict) -> float | None:
+    if not kernel["cpu_max"]:
+        return None
+    quota, period = kernel["cpu_max"].split()
+    return None if quota == UNLIMITED or int(quota) < 0 else int(quota) / int(period)
+
+
+def not_applied(control: str, enforced) -> str:
+    """Why a declared limit is not the enforced one: this Compose is too old to have applied it.
+
+    Compose 2.2 is the first to apply `pids_limit` and 2.17 the first to apply `cpus`; a
+    current Docker Desktop applies both. Until then the runbook's pre-demo check names the
+    `docker update` that applies them to the running container.
+    """
+    version = compose("version", "--short").stdout.strip()
+    return f"{control} is declared but the kernel enforces {enforced!r}: Compose {version} did not apply it"
+
+
+@pytest.fixture(scope="module")
+def kernel() -> dict:
+    """The running container's kernel's answer, read once for the class below."""
+    asked = compose("exec", "-T", DEMO_SERVICE, "python3", "-c", ASK_THE_KERNEL)
+    assert asked.returncode == 0, asked.stderr
+    return json.loads(asked.stdout)
+
+
+@needs_the_stack_up
+class TestTheBoundaryOfAStackThatIsUp:
+    """With `docker compose up -d` done: the controls the default run reads off the compose
+    file, as the kernel of the machine giving the demo actually enforces them (story 23)."""
+
+    def test_the_container_runs_as_the_user_the_dockerfile_created(self, kernel):
+        assert kernel["uid"] == run_user_id()
+
+    def test_the_root_filesystem_refuses_a_write_even_where_the_user_owns_it(self, kernel):
+        """/app is the Run user's own; only a read-only root can refuse it a write there."""
+        assert kernel["writes"][APPLICATION_DIRECTORY] == "Read-only file system"
+
+    @pytest.mark.parametrize("directory", scratch_directories())
+    def test_each_scratch_directory_accepts_a_write(self, kernel, directory):
+        assert kernel["writes"][directory] == "accepted"
+
+    def test_no_capability_is_left_not_even_in_the_bounding_set(self, kernel):
+        assert kernel["capabilities"] == dict.fromkeys(CAPABILITY_SETS, NO_CAPABILITIES)
+
+    def test_no_process_can_gain_a_privilege_at_exec(self, kernel):
+        assert kernel["no_new_privs"] == "1"
+
+    def test_the_process_limit_is_the_one_compose_declares(self, kernel):
+        declared = service(DEMO_SERVICE)["pids_limit"]
+
+        assert enforced_processes(kernel) == declared, not_applied("pids_limit", kernel["pids_max"])
+
+    def test_the_memory_limit_is_the_one_compose_declares(self, kernel):
+        declared = memory_in_bytes(service(DEMO_SERVICE)["mem_limit"])
+
+        assert enforced_memory(kernel) == declared, not_applied("mem_limit", kernel["memory_max"])
+
+    def test_the_cpu_limit_is_the_one_compose_declares(self, kernel):
+        declared = float(service(DEMO_SERVICE)["cpus"])
+
+        assert enforced_cpus(kernel) == declared, not_applied("cpus", kernel["cpu_max"])

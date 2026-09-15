@@ -56,10 +56,35 @@ services:
       - "8080:8080"
     networks:
       - demo
-    # The image has no sudo and no setuid route to root (ADR 0005); this says a
-    # Run could not gain one even if something in the image were to grow it back.
+    # The runtime boundary, in the shape Anthropic's secure-deployment guide gives
+    # a headless agent (ADR 0005). Every capability dropped: the Receiver binds an
+    # unprivileged port and needs none. No new privileges: the image has no sudo
+    # and no setuid route to root, and this says a Run could not gain one even if
+    # something in the image were to grow it back. A root filesystem nothing can
+    # write, with what must be written on tmpfs and nowhere else: the temp
+    # directory, the runs directory (RUNS_DIRECTORY in the Dockerfile) and the Run
+    # user's home, where the entrypoint writes the onboarding flag and Claude Code
+    # its configuration and Transcripts. Those three are exactly what `docker diff`
+    # lists after three Runs. Nothing survives a restart, and nothing needs to. The
+    # uid is the one the Dockerfile gave the account; a tmpfs is otherwise root's.
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+      - /app/runs:uid=1000,gid=1000,mode=0700,size=64m
+      - /home/demo:uid=1000,gid=1000,mode=0700,size=512m
+    # Sized for three Runs in a row on a laptop, so a runaway Run cannot take the
+    # machine down mid-demo: a Run is one Claude Code process, its shell and
+    # jira-as, and a whole lifecycle peaked at 24 tasks and 227 MB (ticket 03).
+    # Compose older than 2.2 ignores pids_limit and older than 2.17 ignores cpus;
+    # the opt-in container check reads what the kernel enforces and names the
+    # one that is missing.
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
     # Python's standard library, because the image carries no curl: compose must
     # report the container healthy for the right reason.
     healthcheck:

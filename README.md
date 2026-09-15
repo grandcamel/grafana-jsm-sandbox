@@ -183,6 +183,19 @@ with. It mounts no Docker socket and holds no credential — those arrive at `do
 from `.env`, which git ignores and the build context refuses. The image is 539 MB; the developer
 image it replaced was 4.35 GB.
 
+The container runs the way Anthropic's secure-deployment guide describes a headless agent, and
+the compose file is the whole list: every Linux capability dropped, `no-new-privileges`, a
+read-only root filesystem, a process limit, and memory and CPU limits sized for three Runs in a
+row on a laptop. The three directories a Run writes are tmpfs, and nothing else is writable:
+`/tmp`, the runs directory, and the Run user's home, where the entrypoint writes the onboarding
+flag and Claude Code its configuration and Transcripts. They are exactly what `docker diff`
+lists after three Runs, and none survives a restart. The default test run reads each control
+off the compose file; the opt-in stack checks read them back from the running container's
+kernel, a write refused on the read-only root and accepted on each tmpfs among them, and say so
+when a Compose too old to apply a limit has left it off (`pids_limit` needs Compose 2.2, `cpus`
+2.17). Which controls are the guide's and which are this repo's is in the runbook's spoken
+points.
+
 On a laptop behind an intercepting proxy, one variable names the corporate root CA as a PEM
 file under `certs/`, a directory git takes nothing from but the empty placeholder the build
 defaults to. Both images install it into their system trust store before any `npm` or `pip`
@@ -262,7 +275,7 @@ docker compose run --rm demo sh
 
 [`docs/demo-runbook.md`](docs/demo-runbook.md) is the runbook: the three-window screen layout,
 the pre-demo checks, every presenter action with what the audience sees and how long each wait
-is, the four spoken points, the replay fallback, and the reset. Its numbers come from a timed
+is, the five spoken points, the replay fallback, and the reset. Its numbers come from a timed
 rehearsal recorded in ticket 08.
 
 Rehearsals leave Incidents behind, and the Incidents queue must start empty. The reset takes

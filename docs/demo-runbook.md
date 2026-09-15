@@ -139,8 +139,10 @@ minute except the first.
     which it prints the delete command for. See
     [Reset](#reset-between-takes-or-after-a-bad-one) for what it does and does not do.
 
-4. **Grafana provisioned and the rule Normal.** The opt-in checks ask the running Grafana what it
-   was actually given, and the running container who it is running as:
+4. **Grafana provisioned, the rule Normal, the boundary in place.** The opt-in checks ask the
+   running Grafana what it was actually given, and the running container's kernel what it
+   enforces: who the process is, no capability left, a write refused on the root filesystem
+   and accepted on each tmpfs, and the process, memory and CPU limits the compose file declares:
 
     ```bash
     DEMO_CONTAINER=1 python3 -m pytest tests/test_grafana.py tests/test_container.py -q
@@ -150,6 +152,15 @@ minute except the first.
     was built with (see above). The rule check needs the traffic to have been flowing for a
     minute, so run it after step 3, not before. If a provisioning file was edited since the stack came up, Grafana has
     not seen it: `docker compose restart lgtm`, wait a minute, rerun.
+
+    A limit check that fails with `Compose <version> did not apply it` means Docker Desktop's
+    Compose is older than the key: `pids_limit` needs Compose 2.2, `cpus` needs 2.17, and a
+    current Docker Desktop has both. Do not present a limit the kernel is not enforcing. The
+    stopgap puts both on the running container until it is next recreated; then rerun the check:
+
+    ```bash
+    docker update --pids-limit 256 --cpus 2 "$(docker compose ps -q demo)"
+    ```
 
 5. **Eyes.** Grafana's list shows the rule **Normal**. The Incidents queue shows nothing a Run
    made. The log's last lines are a `receiver listening` or a finished Run, not a Run in
@@ -202,7 +213,7 @@ A re-fire deliberately gets a new Incident, which is the chapter two story, not 
 
 ## What to say
 
-These are the four points the audience is there for, in the order the demo makes them
+These are the five points the audience is there for, in the order the demo makes them
 available. Each has one thing on screen to point at.
 
 **The Run can only run jira-as.** A Run is headless Claude Code in print mode with
@@ -232,8 +243,26 @@ work laptop a Run reaches Anthropic through the same proxy the build did. Every 
 said` line in the log is the swap happening; a sentinel copied out of a Transcript is worth
 nothing afterwards (ADR 0002). Show `RunSpawner` in
 [`grafana_jsm_sandbox/run_spawner.py`](../grafana_jsm_sandbox/run_spawner.py) if asked how.
-Nothing in the container is privileged: no Docker socket, non-root user, secrets from an env
-file that git and the build context both refuse.
+
+**The container is the boundary, in the shape Anthropic's guide gives it.** The demo service
+runs the way Anthropic's secure-deployment guide says to run a headless agent, and the compose
+file is the whole list: every capability dropped, no new privileges, a read-only root with
+tmpfs for the three directories a Run writes, a process limit, a memory and a CPU limit, a
+non-root user, no Docker socket, and credentials behind a proxy. Say which is whose. All of
+those controls are the guide's, and the Forwarder is the guide's credential-proxy
+recommendation done for Jira. This repo's own are the image carrying nothing but Claude Code
+and `jira-as` (ADR 0005), the sizes of the limits, the sentinel the Forwarder swaps, and the
+`dontAsk` permission mode with its two-tool allow list, which the guide is explicit is not what
+keeps an agent in. Two things the guide has that the demo does not: a custom seccomp profile
+(Docker's default one is what runs) and `--network none`, because the Receiver must accept
+Grafana's webhook and reach Jira and Anthropic; an egress allowlist of exactly those hosts is
+the next step, not what is running. The pre-demo check read every control back from the
+container's kernel; the one-liner, in the hidden shell, prints `Read-only file system` from
+inside the directory the Run user owns:
+
+```bash
+docker compose exec -T demo sh -c 'touch /app/probe'
+```
 
 **The one credential that is not masked.** Say it plainly: the Anthropic OAuth token is in the
 Run's environment, because the Run is Claude Code and that is how it authenticates. Nothing
