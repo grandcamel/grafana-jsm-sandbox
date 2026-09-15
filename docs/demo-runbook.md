@@ -17,8 +17,12 @@ does; right column is what the audience believes.
 | --- | --- | --- |
 | Top left: **Grafana** | <http://localhost:3000/alerting/list?search=rolldice> | The one rule, `rolldice request rate is zero`, and its state: Normal, Pending, Firing. No login |
 | Bottom left: **container log** | a terminal running `docker compose logs -f demo` | Every Run as it happens: its reasoning, every `jira-as` command in full, every `forwarded` line, any `[DENIED]` |
-| Right: **OPS Incidents queue** | <https://jasonkrue.atlassian.net/jira/servicedesk/projects/OPS/queues/custom/608> | The Incident appearing, changing status, and leaving |
+| Right: **OPS Incidents queue** | `https://<your-site>.atlassian.net/jira/servicedesk/projects/OPS/queues/custom/<queue-id>` | The Incident appearing, changing status, and leaving |
 | Hidden: **presenter shell** | a second terminal, repo root | The two commands the presenter types. Keep it out of the projected area or the audience reads ahead |
+
+`<your-site>` and `<queue-id>` are yours to fill in: open the OPS project's **Queues**, click
+**Incidents**, and the address bar has both. The queue id is that queue's own and differs on
+every site, so bookmark the address the day before rather than typing it live.
 
 Reload the queue and the Grafana list by hand when the log says a Run has finished. Neither
 refreshes fast enough on its own to be trusted during the demo.

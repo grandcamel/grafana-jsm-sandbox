@@ -1,8 +1,13 @@
+# Adapted from grafana/docker-otel-lgtm, examples/python/Dockerfile
+# (https://github.com/grafana/docker-otel-lgtm), Copyright Grafana Labs, and
+# licensed under the Apache License, Version 2.0; a copy of the License is at
+# http://www.apache.org/licenses/LICENSE-2.0. Modified for this repository: the
+# base image, the build context and the corporate CA step below. See NOTICE.
+#
 # The synthetic traffic's target: the rolldice Flask app from the otel-lgtm
 # examples, auto-instrumented so that every request becomes a metric the Alert
-# rule can watch. Copied from ~/projects/docker-otel-lgtm/examples/python rather
-# than built from there, because story 53 keeps that repo read-only and this one
-# self-contained.
+# rule can watch. Copied from those examples rather than built from that repo,
+# because story 53 keeps it read-only and this one self-contained.
 #
 # One departure from the example: a Debian slim base instead of alpine, because
 # every dependency has a wheel for it and none has to be compiled during a build

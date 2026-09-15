@@ -22,7 +22,7 @@
 
 **2026-09-14 — implemented.** 130 tests pass from a clean checkout with `python3 -m pytest`; ruff
 and mypy are clean. The lifecycle below was driven five times against the real OPS project on
-`jasonkrue.atlassian.net`, with every Jira request going through the Forwarder and the Run holding
+the real Atlassian site, with every Jira request going through the Forwarder and the Run holding
 only a sentinel.
 
 - `skill/incident-sync/SKILL.md` — the skill a Run follows. Every operation is a `jira-as`

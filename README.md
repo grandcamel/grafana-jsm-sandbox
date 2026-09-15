@@ -1,7 +1,45 @@
 # grafana-jsm-sandbox
 
-A Grafana alert Notification triggers a headless Claude Run inside a container, and that Run
-creates, updates and resolves Incidents in the Jira OPS project.
+A Grafana alert opens, updates and resolves a Jira Service Management Incident through a
+headless Claude Code Run that holds no Jira credential. One `docker compose up` brings up a
+Grafana LGTM stack with one alert rule, the small app that rule watches, the synthetic traffic
+whose absence fires it, and one hardened container whose main process receives the alert's
+Notification and starts a Run for it: Claude Code in print mode, allowed exactly two tools,
+following one Skill, reaching Jira through a localhost Forwarder that swaps a per-Run sentinel
+for the real token. Stop the traffic and an Incident appears in the queue; start it again and
+the Incident is Completed, with the trend commented in between. It was built as a demo of what a
+sandboxed boundary looks like when the audience may ask what else the Run can reach, and
+[the runbook](docs/demo-runbook.md) is the presenter's script.
+
+## What you need
+
+- **Docker** with Compose v2. The demo is `docker compose up`: the images are pulled from Docker
+  Hub or built here, and nothing is installed on the laptop. Compose applies `pids_limit` from
+  2.2 and `cpus` from 2.17; an older one silently leaves them off, and the runbook says how to
+  tell and what to do meanwhile.
+- **A Jira Cloud site with a Jira Service Management project created from the ITSM template.**
+  The Skill and the tests call it `OPS` and use its Incident issue type, and an API token for
+  an account on that site is what the Forwarder holds. ADR 0004 records the project template key
+  that created ours.
+- **A Claude Code OAuth token**, from `claude setup-token` on a machine where Claude Code is
+  logged in. It is the one credential a Run really holds.
+- **`jira-as` in your own shell**, the Jira Assistant CLI 2.x, with the same Jira credential in
+  its environment. The image carries its own copy for Runs; yours is for the reset between takes
+  and the opt-in end-to-end check.
+
+**The OPS field ids in the Skill are one site's.** Custom field ids differ on every Jira site,
+so the Severity, Urgency and Source ids in [`skill/incident-sync/SKILL.md`](skill/incident-sync/SKILL.md),
+and the Major incident id it says never to touch, must be re-read from your own project and
+edited in before a Run creates anything. From the repo root, with the credential in the shell:
+
+```bash
+jira-as -o json api call getFields
+```
+
+lists every field on the site; the ITSM template's Severity, Urgency, Source and Major incident
+are among them under your own `customfield_` numbers. The Incidents queue id the runbook names
+is read the same way, off the address bar. Transition ids need no such step: a Run reads them
+off each Incident as it goes.
 
 Domain vocabulary is in [CONTEXT.md](CONTEXT.md); decisions are in [docs/adr](docs/adr);
 the spec and tickets are under [.scratch/alert-to-incident-sync](.scratch/alert-to-incident-sync)
@@ -221,7 +259,8 @@ Grafana is on the laptop at <http://localhost:3000>, anonymous admin, no login f
 
 Grafana's contact point, notification policy and alert rule are provisioned from
 [`grafana/provisioning/alerting`](grafana/provisioning/alerting), mounted read-only into the LGTM
-container. The other repo is a reference only; nothing there is edited. Grafana reads the
+container. Nothing inside the published image is edited; these three files are the whole of the
+alerting configuration. Grafana reads the
 directory once, at startup, so a change to any of the three files is `docker compose restart lgtm`.
 
 | File | What it provisions |
@@ -309,10 +348,11 @@ deletes.
 | `Dockerfile` | The demo image: slim Node plus Python, Claude Code, `jira-as`, the package and the skill, one non-root user |
 | `docker/entrypoint.sh` | What the container starts: onboarding pre-accepted, then the Receiver |
 | `docker-compose.yml` | The LGTM stack, the demo container, rolldice and its traffic, on one network |
-| `docker/rolldice/` | The rolldice example app, copied from the otel-lgtm examples, auto-instrumented |
+| `docker/rolldice/` | The rolldice example app, copied from the `grafana/docker-otel-lgtm` examples under Apache-2.0, auto-instrumented |
 | `certs/` | Where a corporate root CA goes for a build behind a proxy; only the empty placeholder is committed |
 | `grafana/provisioning/alerting/` | The contact point, the notification policy and the alert rule Grafana loads |
 | `.env.example` | Every variable the container needs, with placeholders |
+| `LICENSE`, `NOTICE` | MIT for this repository; the Apache-2.0 attribution for the copied rolldice files |
 | `fixtures/notification-*.json` | The canned Notification sequence as Grafana really posted it: firing, repeat, resolved |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
 | `fixtures/run-transcript-repeat-firing.jsonl` | A recorded Run that commented a trend on a real Incident |
@@ -374,3 +414,9 @@ the system bundle, compose hands the same argument to both builds, and git ignor
 `certs/` but the placeholder. It also holds compose to the three things the live Alert depends
 on: every service on the one network, this repo's provisioning directory mounted where Grafana
 reads it, and a stopped `traffic` staying stopped.
+
+## License
+
+MIT, in [LICENSE](LICENSE). The three files under `docker/rolldice/` are copied from
+[grafana/docker-otel-lgtm](https://github.com/grafana/docker-otel-lgtm) and stay under the
+Apache License 2.0; [NOTICE](NOTICE) says which, and what was changed.

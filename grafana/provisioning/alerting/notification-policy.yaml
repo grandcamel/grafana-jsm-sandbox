@@ -5,7 +5,7 @@
 # fire once and the repeat Firings that add trend comments to the Incident would
 # never arrive during the demo. `repeat_interval: 1m` is the override, and the
 # spec calls it the most likely thing to be lost if this stack is rebuilt from
-# the other repo. The group wait and interval are short for the same reason: the
+# the grafana/docker-otel-lgtm repo it came from. The group wait and interval are short for the same reason: the
 # first Notification and the Resolved should each follow the rule's state change
 # within seconds, not minutes.
 apiVersion: 1

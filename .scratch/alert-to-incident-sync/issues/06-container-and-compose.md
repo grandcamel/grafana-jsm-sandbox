@@ -51,7 +51,7 @@ no credential variable in the built image's environment.
 Four deviations worth recording:
 
 - **The entrypoint does not pre-accept bypass permissions mode.** The ticket says onboarding is
-  pre-accepted "the way the existing entrypoints do it", and the as-demo entrypoint writes
+  pre-accepted "the way the existing entrypoints do it", and the earlier demo's entrypoint writes
   `hasCompletedOnboarding` and `bypassPermissionsModeAccepted` together. Writing the second is
   precisely what ADR 0003 refuses — it is the skip-permissions route every other wrapper on this
   machine takes. This entrypoint writes only `hasCompletedOnboarding`, and a Run starts fine

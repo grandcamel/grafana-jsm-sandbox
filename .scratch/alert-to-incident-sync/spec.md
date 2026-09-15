@@ -153,7 +153,7 @@ One `docker compose up` starts a local Grafana LGTM stack and one demo container
 - Forwarder tests, against a fake upstream server: correct sentinel yields a forwarded request carrying the real credential and none of the sentinel; wrong or missing sentinel yields 401 and no upstream call; upstream status and body pass back; log output contains neither the real token nor an Authorization header.
 - Formatter tests: table-driven over recorded stream-json events, including a permission-denied event and a final result event.
 - End-to-end check, opt-in by an environment flag: posts the canned sequence to a running container and asserts by jira-as JQL that one Incident exists with the Fingerprint label, has at least two comments, and ends in Completed. Cleans up by transitioning the Incident to Canceled. Not part of the default run.
-- Prior art: none in this repo. The as-demo repo's skill tests are subprocess-driven and not reused.
+- Prior art: none in this repo. An earlier demo repo's skill tests are subprocess-driven and not reused.
 
 ## Out of Scope
 
@@ -174,5 +174,5 @@ One `docker compose up` starts a local Grafana LGTM stack and one demo container
 - jira-as sends basic auth through the requests library and mounts both http and https adapters, so the plain-http Forwarder URL works without patching.
 - In print mode with dontAsk, denials are reported as permission-denied events in the stream and in the result's denial list. That is the audience-visible proof for story 7.
 - The Anthropic OAuth token cannot be masked by any documented mechanism. Say it out loud.
-- The as-demo entrypoint ignores its command argument. The demo container in this repo has its own entrypoint and does not reuse that one.
+- The earlier demo's entrypoint ignores its command argument. The demo container in this repo has its own entrypoint and does not reuse that one.
 - Domain vocabulary is in CONTEXT.md; decisions in docs/adr. Use those terms in ticket titles and test names.

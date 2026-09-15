@@ -210,7 +210,7 @@ def test_every_service_shares_the_one_network():
 
 
 def test_grafana_reads_its_alerting_provisioning_from_this_repo():
-    """Story 53: the other repo is a reference, and this one mounts its own files over the sample."""
+    """Story 53: `grafana/docker-otel-lgtm` is a reference; this repo mounts its own files over the sample."""
     mounts = [str(volume).split(":") for volume in service(LGTM_SERVICE).get("volumes", [])]
     alerting = [parts for parts in mounts if parts[1] == GRAFANA_ALERTING_PROVISIONING]
 

@@ -26,7 +26,7 @@ ruff and mypy are clean.
 - `tests/upstream.py` — the fake Atlassian site the Forwarder tests run against.
 - `CONTEXT.md` — Sentinel now has a glossary entry; it was load-bearing vocabulary without one.
 
-**Manual check, run twice against the real site (`jasonkrue.atlassian.net`).** With
+**Manual check, run twice against the real Atlassian site.** With
 `python3 -m grafana_jsm_sandbox.forwarder` holding the token and jira-as holding only a
 32-character sentinel:
 
@@ -34,9 +34,9 @@ ruff and mypy are clean.
   and the Forwarder logged `forwarded GET /rest/api/3/search/jql?jql=project+%3D+OPS... upstream
   said 200`. OPS has no Incidents yet, so zero results is the right answer; the 200 is the proof
   the real credential was attached, since that endpoint answers 401 without one.
-- `jira-as api call getCurrentUser` through the same sentinel returned
-  `"emailAddress": "jasonkrue@gmail.com"`, so the forwarded request was authenticated as the real
-  account rather than merely reaching the site.
+- `jira-as api call getCurrentUser` through the same sentinel returned the account's own
+  `emailAddress`, so the forwarded request was authenticated as the real account rather than
+  merely reaching the site.
 - The same search with `JIRA_API_TOKEN=not-the-sentinel` was refused and never reached upstream.
 - The Forwarder's whole log for both runs contains no token and no Authorization header.
 

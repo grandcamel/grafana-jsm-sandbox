@@ -22,14 +22,14 @@ name is ADR 0002. What a public reader would see that is personal or local:
 
 | Where | What | Judgement |
 | --- | --- | --- |
-| Every commit | Author `grandcamel <jasonkrue@gmail.com>` | Already the GitHub identity. Leave it; a history rewrite to hide it is not worth it |
+| Every commit | Author `grandcamel <the account's email>` | Already the GitHub identity. Leave it; a history rewrite to hide it is not worth it |
 | `fixtures/run-transcript-repeat-firing.jsonl` | A `jira-as issue get` result carrying the Jira account's `emailAddress` and `accountId`, eight times on one line | Scrub to `ops@example.invalid` and a fake account id. The formatter tests read this fixture, so run them after |
 | `docs/demo-runbook.md` | The real site URL for the Incidents queue | Presenter-specific. Replace with `https://<your-site>.atlassian.net/...` and say where the queue id comes from |
 | `HANDOFF.md` | The site name, the audience company, and paths into three other local repos | A session handoff, not project documentation. Remove it from the public tree; its facts that still matter live in CONTEXT.md, the ADRs and the README |
-| `.scratch/` | Spec and eight tickets; the site name in two tickets, the account email in one, the audience company in the spec, the private `as-demo` repo named in two places | Decision below: keep as the build's record with those strings scrubbed, or drop the directory |
+| `.scratch/` | Spec and eight tickets; the site name in two tickets, the account email in one, the audience company in the spec, a private earlier demo repo named in two places | Decision below: keep as the build's record with those strings scrubbed, or drop the directory |
 | `Dockerfile` | `FROM grandcamel/claude-devcontainer:latest` | Public on Docker Hub and on GitHub, so a stranger's build works. Pin a tag or digest rather than `latest` so the build is reproducible |
 | `docker/rolldice/` | Three files copied from `docker-otel-lgtm`'s Python example, Apache-2.0 | Needs attribution: a NOTICE line or a header comment naming the source and its license |
-| `fixtures/*.jsonl` | The recording session's scratchpad path under `/private/tmp/.../-Users-jasonkrueger-...` | Cosmetic. Scrub the `cwd` to `/app/runs/<run-id>` while the fixture is open anyway |
+| `fixtures/*.jsonl` | The recording session's scratchpad path under `/private/tmp/.../-Users-<user>-...` | Cosmetic. Scrub the `cwd` to `/app/runs/<run-id>` while the fixture is open anyway |
 | `.claude/settings.json` | `allowed_projects: ["OPS"]`, `allow_site_operations: true` | Fine to publish; it is the project-scoped jira-as configuration the README describes |
 
 The Grafana fixtures carry only `localhost:3000` URLs and the synthetic rolldice labels. The

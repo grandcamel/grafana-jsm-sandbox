@@ -1,6 +1,6 @@
 # grafana-jsm-sandbox
 
-Grafana alert webhook -> sandboxed Claude harness -> Jira OPS incident. See `HANDOFF.md` for the demo goal and verified OPS project facts.
+Grafana alert Notification -> sandboxed Claude Run -> Jira OPS Incident. See `README.md` for what the demo is and needs; the OPS facts a Run relies on are in `skill/incident-sync/SKILL.md` and `docs/adr/0004-fingerprint-label-and-platform-ops-only.md`.
 
 ## Agent skills
 

@@ -1,0 +1,12 @@
+grafana-jsm-sandbox
+Copyright (c) 2026 grandcamel
+Licensed under the MIT License; see LICENSE.
+
+The rolldice example app under docker/rolldice/ is copied from
+grafana/docker-otel-lgtm (https://github.com/grafana/docker-otel-lgtm),
+directory examples/python/, Copyright Grafana Labs, and is licensed under the
+Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0):
+
+    docker/rolldice/app.py            as upstream, with the attribution header added
+    docker/rolldice/requirements.txt  as upstream, with the attribution header added
+    docker/rolldice/Dockerfile        modified; its header says how

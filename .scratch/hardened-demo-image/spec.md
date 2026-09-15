@@ -9,15 +9,15 @@ open decisions were taken on 2026-09-15 and are recorded below)
 
 The demo image extends `grandcamel/claude-devcontainer`, a 4.1 GB batteries-included developer
 image built for interactive work: it carries `sudo`, the `docker` CLI, `docker`-group membership,
-`gh`, `iptables` and some thirty developer tools that no Run needs and that a T-Mobile audience
+`gh`, `iptables` and some thirty developer tools that no Run needs and that a corporate audience
 will ask about. The research in `docs/research/harness-sandbox-containers-2026-09.md` found that
 Anthropic's own guidance for a headless, tool-restricted agent is a minimal container hardened
 with dropped capabilities, a read-only root and a non-root user, with credentials behind a proxy,
 which is what the Forwarder already is.
 
-The next showing is on a T-Mobile work laptop behind Zscaler. That laptop can clone only a
+The next showing is on a corporate work laptop behind Zscaler. That laptop can clone only a
 public GitHub repository, and every TLS connection from a process on it, including from inside a
-container, is intercepted by Zscaler and presents a certificate chain ending in the T-Mobile root
+container, is intercepted by Zscaler and presents a certificate chain ending in the corporate root
 CA. Today nothing in the image, the build, the Receiver, the Forwarder or a Run trusts that CA, so
 `npm install` and `pip install` fail during the build, the Forwarder cannot reach Atlassian, and
 a Run cannot reach Anthropic. The repo also has no remote, no license, and a few private strings.
@@ -41,7 +41,7 @@ Receiver, the Forwarder, the Skill, the Run's permission mode and the sentinel a
 
 1. As a presenter, I want to clone the public repository on the work laptop and run one compose
    command, so that the demo builds there without any file that only exists on the personal laptop.
-2. As a presenter, I want to point the build at the T-Mobile root CA with one environment
+2. As a presenter, I want to point the build at the corporate root CA with one environment
    variable, so that the build's `npm` and `pip` installs succeed behind Zscaler.
 3. As a presenter, I want the Forwarder to reach the Atlassian site through Zscaler, so that a Run's
    Jira calls succeed on the work laptop exactly as they do at home.
