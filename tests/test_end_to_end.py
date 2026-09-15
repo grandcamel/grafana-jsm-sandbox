@@ -28,13 +28,13 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import time
 from dataclasses import dataclass
 
 import pytest
 
 from grafana_jsm_sandbox.replay import DEFAULT_RECEIVER, replay
+from grafana_jsm_sandbox.reset import CLOSED, COMPLETED, RESOLUTION, move_to, run_jira_as, search
 from tests.conftest import firing_notification
 
 END_TO_END_VARIABLE = "DEMO_END_TO_END"
@@ -55,18 +55,12 @@ PAUSE = 10.0
 POLL = 5.0
 """Seconds between looks at OPS, which is a real site and not to be hammered."""
 
-JIRA_AS = "jira-as"
-"""The CLI a Run uses, used here to ask OPS what the Runs actually did."""
-
 LABELLED = 'project = OPS AND issuetype = Incident AND labels = "{label}"'
 """Every Incident ever created for this Fingerprint, in any status."""
 
 MATCH = LABELLED + " AND statusCategory != Done"
 """The Match as a Run defines it (ADR 0004): the one *open* Incident for a Fingerprint."""
 
-COMPLETED = "Completed"
-CLOSED = "Closed"
-RESOLUTION = "Done"
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get(END_TO_END_VARIABLE),
@@ -119,12 +113,12 @@ def clean_up(label: str, before: set[str]) -> None:
     """Leave every Incident this run created resolved and closed, out of the open queues."""
     for key in sorted(keys_labelled(label) - before):
         if incident(key).resolution is None:
-            move_to(key, COMPLETED, resolution=RESOLUTION)
+            move_to(run_jira_as, key, COMPLETED, resolution=RESOLUTION)
         if incident(key).resolution is None:
             # Closing it now would park it in the Incidents queue for good, which is
             # worse than leaving it visible for a human to finish.
             continue
-        move_to(key, CLOSED)
+        move_to(run_jira_as, key, CLOSED)
 
 
 def fingerprint_label() -> str:
@@ -142,12 +136,12 @@ def setting(variable: str, default: float) -> float:
 
 def keys_labelled(label: str) -> set[str]:
     """Every Incident carrying `label`, however it ended."""
-    return {issue["key"] for issue in search(LABELLED.format(label=label))}
+    return {issue["key"] for issue in search(run_jira_as, LABELLED.format(label=label))}
 
 
 def open_match(label: str) -> str | None:
     """The one open Incident carrying `label`, which is what a Run would act on."""
-    found = search(MATCH.format(label=label))
+    found = search(run_jira_as, MATCH.format(label=label))
     assert len(found) <= 1, f"{label} matched more than one open Incident: {found}"
     return found[0]["key"] if found else None
 
@@ -162,32 +156,5 @@ def incident(key: str) -> Incident:
     )
 
 
-def move_to(key: str, status: str, resolution: str | None = None) -> None:
-    """Take the transition that lands on `status`, if there is one from where it is."""
-    wanted = [
-        transition
-        for transition in jira_as_json("lifecycle", "transitions", key)
-        if transition.get("to", {}).get("name") == status
-    ]
-    if not wanted:
-        return
-    arguments = ["lifecycle", "transition", key, "--id", wanted[0]["id"]]
-    if resolution is not None:
-        arguments += ["--resolution", resolution]
-    jira_as(*arguments)
-
-
-def search(jql: str) -> list[dict]:
-    return jira_as_json("search", "jql", jql).get("issues", [])
-
-
 def jira_as_json(*arguments: str):
-    return json.loads(jira_as(*arguments, "-o", "json"))
-
-
-def jira_as(*arguments: str) -> str:
-    answer = subprocess.run(
-        [JIRA_AS, *arguments], capture_output=True, text=True, timeout=120, check=False
-    )
-    assert answer.returncode == 0, f"{' '.join(arguments)} failed: {answer.stderr.strip()}"
-    return answer.stdout
+    return json.loads(run_jira_as(*arguments, "-o", "json"))

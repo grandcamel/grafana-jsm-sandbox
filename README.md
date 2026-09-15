@@ -240,6 +240,26 @@ honours a command:
 docker compose run --rm demo sh
 ```
 
+### Presenting it
+
+[`docs/demo-runbook.md`](docs/demo-runbook.md) is the runbook: the three-window screen layout,
+the pre-demo checks, every presenter action with what the audience sees and how long each wait
+is, the four spoken points, the replay fallback, and the reset. Its numbers come from a timed
+rehearsal recorded in ticket 08.
+
+Rehearsals leave Incidents behind, and the Incidents queue must start empty. The reset takes
+every open Incident a Run made — the ones with an `fp-` label — out of the queue the only clean
+way this workflow has, `Resolve` with a resolution and then `Close` (ADR 0004), and starts the
+traffic so the rule goes back to Normal:
+
+```bash
+python3 -m grafana_jsm_sandbox.reset
+```
+
+It runs on the laptop with the `jira-as` credential in the shell, prints what it did per key,
+and exits non-zero if anything a human has to finish is still open. It never cancels and never
+deletes.
+
 ## Layout
 
 | Path | What it holds |
@@ -251,6 +271,8 @@ docker compose run --rm demo sh
 | `grafana_jsm_sandbox/run_command.py` | The command line that starts one Run, and its allow list |
 | `grafana_jsm_sandbox/run_spawner.py` | Starting one Run for real: its scrubbed environment, its sentinel |
 | `grafana_jsm_sandbox/replay.py` | Posting the canned Notification sequence at a Receiver |
+| `grafana_jsm_sandbox/reset.py` | Emptying the Incidents queue of a rehearsal's Incidents and restarting the traffic |
+| `docs/demo-runbook.md` | The presenter's runbook: screen, checks, actions, spoken points, fallback, reset |
 | `grafana_jsm_sandbox/__main__.py` | The whole process: configuration, the Forwarder, the Receiver |
 | `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
 | `Dockerfile` | The demo image: Claude Code, `jira-as`, the package and the skill |
