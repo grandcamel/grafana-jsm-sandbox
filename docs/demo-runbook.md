@@ -57,10 +57,10 @@ minute except the first.
     ```
 
     Prints one line per Incident it closed or left alone, then `queue is empty` and exit 0
-    when nothing is left in the Incidents queue. **Until the six probes below are dealt with it
-    ends `queue is NOT empty` and exit 1, naming them**, and that is the expected result on the
-    day unless they have been deleted. Any other key it names is a human's: an open Incident
-    in a status a Run never uses, or without an `fp-` label, finished in the Jira UI. See
+    when nothing is left in the Incidents queue. Any key it names is a human's: an open
+    Incident in a status a Run never uses, or without an `fp-` label, finished in the Jira UI;
+    or a done Incident with no resolution, which only deletion removes from the queue and
+    which it prints the delete command for. See
     [Reset](#reset-between-takes-or-after-a-bad-one) for what it does and does not do.
 
 4. **Grafana provisioned and the rule Normal.** The opt-in checks ask the running Grafana what it
@@ -79,19 +79,19 @@ minute except the first.
    progress. Nothing else is posting at the Receiver: no replay, no end-to-end test in another
    shell.
 
-**The six probes, decided before the demo.** The reset names OPS-1 to OPS-6 as stuck: the
-probes from the day the workflow was mapped, `Canceled` or `Closed` without a resolution. The
-queue filters on resolution, and no transition on this workflow can give them one now (ADR
-0004), so they sit in the Incidents queue until one of two things is done. They are throwaway
-and can be deleted, one at a time; the reset never deletes anything and this is the presenter's
-call:
+**If the reset names an Incident as stuck.** A `Canceled` or `Closed` Incident with no
+resolution stays in the queue, because the queue filters on resolution and no transition on
+this workflow can give it one afterwards (ADR 0004). Nothing but deletion removes it, one key at
+a time, and the reset never deletes; that is the presenter's call. The six probes from the day
+the workflow was mapped were exactly this and were deleted on 2026-09-15, so the queue starts
+empty now.
 
 ```bash
-jira-as api call deleteIssue --issueIdOrKey OPS-1
+jira-as api call deleteIssue --issueIdOrKey OPS-n
 ```
 
-The alternative is to project a filter instead of the queue, which starts empty and needs no
-deletion: `project = OPS AND issuetype = Incident AND statusCategory != Done ORDER BY created DESC`.
+The alternative is to project a filter instead of the queue, which needs no deletion:
+`project = OPS AND issuetype = Incident AND statusCategory != Done ORDER BY created DESC`.
 
 ## The demo, step by step
 

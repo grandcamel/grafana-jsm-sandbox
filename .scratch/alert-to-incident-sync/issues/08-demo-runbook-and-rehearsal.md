@@ -107,3 +107,8 @@ After the refactor, `DEMO_END_TO_END=1 DEMO_RECEIVER_URL=http://localhost:8080 p
 tests/test_end_to_end.py` passed in 84s against the container, driving OPS-15 from created to
 Completed with resolution Done and closing it through the shared helpers on the way out. The
 rehearsal's OPS-14 stays Completed.
+
+**Decision taken 2026-09-15:** the six probes OPS-1 to OPS-6 were deleted by hand. Queue 608 read
+empty afterwards through the servicedeskapi, and the reset ends `queue is empty` with exit 0. The
+runbook's step 3 and its stuck-Incident paragraph now describe the general case rather than the
+six.
