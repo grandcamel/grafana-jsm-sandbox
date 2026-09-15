@@ -67,3 +67,14 @@ are what the skill asks for, and both durations came off the Jira clock rather t
 Cleanup left OPS-9 `Closed` with resolution `Done`, so the check added nothing to the Incidents
 queue and can be run again. The six `Canceled` Incidents from ticket 04 are still stuck there; see
 that ticket's own open item.
+
+### One thing that passed by luck
+
+Ticket 04 handed this ticket a requirement its checklist never restated: the Run's environment
+needs `JIRA_ALLOW_SITE_OPERATIONS=true`, because `getServerInfo` is site-scoped and it is the only
+clock a Run can reach. The scrubbed environment did not set it, and OPS-9 worked anyway — the Run's
+working directory sat under this repo, so jira-as walked up and found `.claude/settings.json`.
+Under the container there is no such tree: `jira-as api call getServerInfo` from `/private/tmp`
+answers `site access is disabled`, and every duration in every comment would have broken on the
+day. The spawner now sets it, and the check is a Run started outside this repo reaching
+`/rest/api/3/serverInfo` through the Forwarder with nothing but a sentinel.

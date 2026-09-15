@@ -37,6 +37,15 @@ RUN_TIMEOUT = 300.0
 """Seconds a Run may take before it is killed. Long enough for the five operations, short
 enough that a stuck Run does not eat the slot."""
 
+SITE_OPERATIONS_VARIABLE = "JIRA_ALLOW_SITE_OPERATIONS"
+"""jira-as refuses site-scoped calls unless this says otherwise, and a Run needs exactly one
+of them: `getServerInfo`. A Run has no clock — `date` is not on its allow list — so every
+duration it reports is Jira's `serverTime` minus the Incident's `created` (ticket 04). Without
+this, a Run outside a tree holding a jira-as settings file cannot read the time at all.
+
+It gates which calls jira-as will make, not what the credential behind the Forwarder can reach,
+so it widens nothing: the boundary is the sentinel and the allow list."""
+
 SENTINEL_BYTES = 24
 """How much randomness each Run's sentinel carries."""
 
@@ -132,13 +141,14 @@ class RunSpawner:
         The Jira variables are the ones jira-as reads, so a Run needs no patching
         to talk to the Forwarder — it only ever holds the sentinel. HOME is not
         among them: the Claude CLI falls back to the account's home directory,
-        and leaving it out keeps the list something a presenter can read aloud.
+        and leaving it out keeps the list short enough to read aloud.
         """
         return {
             ANTHROPIC_TOKEN_VARIABLE: self.anthropic_token,
             ENVIRONMENT_VARIABLES["site_url"]: self.forwarder.url,
             ENVIRONMENT_VARIABLES["email"]: self.jira_email,
             ENVIRONMENT_VARIABLES["api_token"]: sentinel,
+            SITE_OPERATIONS_VARIABLE: "true",
             "PATH": self.path,
         }
 

@@ -18,7 +18,11 @@ import pytest
 
 from grafana_jsm_sandbox.notification import NOTIFICATION_FILENAME
 from grafana_jsm_sandbox.receiver import Receiver, Run
-from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE, RunSpawner
+from grafana_jsm_sandbox.run_spawner import (
+    ANTHROPIC_TOKEN_VARIABLE,
+    SITE_OPERATIONS_VARIABLE,
+    RunSpawner,
+)
 from tests.conftest import (
     REAL_EMAIL,
     REAL_TOKEN,
@@ -138,6 +142,7 @@ def test_the_runs_environment_is_built_from_scratch(forwarder, run):
         "JIRA_EMAIL",
         "JIRA_SITE_URL",
         "JIRA_API_TOKEN",
+        SITE_OPERATIONS_VARIABLE,
         "PATH",
     }
 
@@ -164,6 +169,18 @@ def test_the_run_holds_a_sentinel_where_the_jira_token_would_be(forwarder, run):
     assert environment["JIRA_EMAIL"] == REAL_EMAIL
     assert environment["JIRA_API_TOKEN"] not in ("", REAL_TOKEN)
     assert environment[ANTHROPIC_TOKEN_VARIABLE] == ANTHROPIC_TOKEN
+
+
+def test_the_run_can_read_jiras_clock(forwarder, run):
+    """A Run has no clock of its own, so every duration it reports comes from Jira's.
+
+    Reading it is a site-scoped call, which jira-as refuses unless the Run is told
+    otherwise. On a laptop a settings file up the tree hides this; in the container
+    there is no such tree, and every duration in every comment would break.
+    """
+    spawner_for(_program(DUMP_ENVIRONMENT), forwarder)(run)
+
+    assert environment_of(run)[SITE_OPERATIONS_VARIABLE] == "true"
 
 
 def test_each_run_gets_its_own_sentinel(forwarder, tmp_path):

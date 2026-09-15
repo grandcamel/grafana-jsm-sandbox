@@ -117,8 +117,9 @@ The **Run spawner** — what the Receiver starts for each Notification, for real
 
 `RunSpawner` builds the Run's environment from scratch rather than inheriting one: the Anthropic
 OAuth token, the Jira email, `JIRA_SITE_URL` pointing at the Forwarder over plain http,
-`JIRA_API_TOKEN` set to that Run's sentinel, and `PATH`. Nothing else — not the real Jira token,
-not whatever else the Receiver happened to be started with. The sentinel is registered with the
+`JIRA_API_TOKEN` set to that Run's sentinel, `JIRA_ALLOW_SITE_OPERATIONS` so the Run can ask Jira
+what time it is, and `PATH`. Nothing else — not the real Jira token, not whatever else the
+Receiver happened to be started with. The sentinel is registered with the
 Forwarder before the process starts and cleared the moment it ends, so a sentinel that turns up in
 a Transcript afterwards is worth nothing.
 
