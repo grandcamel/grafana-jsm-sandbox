@@ -204,6 +204,8 @@ traffic whose absence fires it — on one network so that Grafana's contact poin
 by service name.
 
 ```bash
+git clone https://github.com/grandcamel/grafana-jsm-sandbox.git
+cd grafana-jsm-sandbox
 cp .env.example .env     # then fill in the four credentials
 docker compose up -d --build
 docker compose logs -f demo
