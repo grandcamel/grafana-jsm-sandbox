@@ -235,13 +235,7 @@ def test_the_container_ends_as_a_user_who_is_not_root():
 
     `TestAStackThatIsUp` asks the running container the same question properly.
     """
-    users = [
-        line.split(maxsplit=1)[1].strip()
-        for line in DOCKERFILE.read_text().splitlines()
-        if line.startswith("USER ")
-    ]
-
-    assert users and users[-1] != "root"
+    assert run_user() != "root"
 
 
 def test_the_image_is_built_holding_no_credential():
@@ -338,15 +332,39 @@ def run_instructions(dockerfile: Path = DOCKERFILE) -> list[str]:
     return [line for line in dockerfile_instructions(dockerfile) if line.startswith("RUN ")]
 
 
+def run_commands(dockerfile: Path = DOCKERFILE) -> list[list[str]]:
+    """Every shell command the RUN instructions chain, each as its words."""
+    return [
+        command.split()
+        for instruction in run_instructions(dockerfile)
+        for command in re.split(r"&&|;", instruction[len("RUN ") :])
+    ]
+
+
 def apt_packages() -> set[str]:
     """Every package name an `apt-get install` in the Dockerfile asks for."""
     packages: set[str] = set()
-    for instruction in run_instructions():
-        for command in re.split(r"&&|;", instruction[len("RUN ") :]):
-            words = command.split()
-            if words[:2] == ["apt-get", "install"]:
-                packages |= {word for word in words[2:] if not word.startswith("-")}
+    for words in run_commands():
+        if words[:2] == ["apt-get", "install"]:
+            packages |= {word for word in words[2:] if not word.startswith("-")}
     return packages
+
+
+def run_user() -> str:
+    """The account the Dockerfile's last USER names: the Receiver's, and so every Run's."""
+    users = [
+        line.split(maxsplit=1)[1] for line in dockerfile_instructions() if line.startswith("USER ")
+    ]
+    assert users, "the Dockerfile never switches user"
+    return users[-1]
+
+
+def useradd_arguments() -> list[str]:
+    """What the Dockerfile's useradd was given for the user the container ends as."""
+    for words in run_commands():
+        if words[:1] == ["useradd"] and words[-1] == run_user():
+            return words[1:]
+    raise AssertionError(f"{run_user()} is not created by a useradd in the Dockerfile")
 
 
 def test_no_line_of_the_build_installs_an_escalation_tool():
@@ -368,14 +386,7 @@ def test_claude_code_and_jira_as_are_pinned():
 
 def test_the_user_the_container_ends_as_was_created_by_this_dockerfile():
     """Not inherited from a base image whose groups and sudoers nobody here wrote (story 14)."""
-    users = [
-        line.split(maxsplit=1)[1] for line in dockerfile_instructions() if line.startswith("USER ")
-    ]
-    created = [
-        line for line in run_instructions() if "useradd " in line and users[-1] in line.split()
-    ]
-
-    assert created, f"{users[-1]} is not created by a useradd in the Dockerfile"
+    assert run_user() in useradd_arguments()
 
 
 ENTRYPOINT = REPOSITORY / "docker" / "entrypoint.sh"
@@ -686,7 +697,8 @@ NO_NEW_PRIVILEGES = "no-new-privileges:true"
 """The security option under which no process in the container gains a privilege at exec."""
 
 CAPABILITY_SETS = ("CapInh", "CapPrm", "CapEff", "CapBnd")
-"""The four masks /proc/self/status prints; the bounding set is the one nothing can grow back."""
+"""Four of the five masks /proc/self/status prints (the ambient set is empty whenever the
+permitted set is); the bounding set is the one nothing can grow back."""
 
 NO_CAPABILITIES = "0000000000000000"
 """An empty capability mask, as /proc/self/status prints one."""
@@ -695,25 +707,8 @@ APPLICATION_DIRECTORY = "/app"
 """The Run user's own directory in the image. Only a read-only root can refuse it a write."""
 
 
-def run_user() -> str:
-    """The account the Dockerfile's last USER names: the Receiver's, and so every Run's."""
-    users = [
-        line.split(maxsplit=1)[1] for line in dockerfile_instructions() if line.startswith("USER ")
-    ]
-    return users[-1]
-
-
-def useradd_arguments() -> list[str]:
-    """What the Dockerfile's useradd was given for the user the container ends as."""
-    for instruction in run_instructions():
-        for command in re.split(r"&&|;", instruction[len("RUN ") :]):
-            words = command.split()
-            if words[:1] == ["useradd"] and words[-1] == run_user():
-                return words[1:]
-    raise AssertionError(f"{run_user()} is not created by a useradd in the Dockerfile")
-
-
 def run_user_id() -> int:
+    """The uid the Dockerfile gives the account, which the tmpfs the user owns must name too."""
     arguments = useradd_arguments()
     return int(arguments[arguments.index("--uid") + 1])
 
@@ -804,8 +799,9 @@ PEAK_MEMORY_IN_A_LIFECYCLE = 227 * 1024**2
 
 
 def test_a_runaway_run_is_bounded_in_processes_memory_and_cpu():
-    """Sized for three Runs in a row on a laptop (story 20): each limit has headroom over the
-    measured peak, and `TestTheBoundaryOfAStackThatIsUp` reads what the kernel then enforces."""
+    """Sized for three Runs in a row on a laptop (story 20): the process and memory limits have
+    headroom over the measured peak, the CPU limit is a share of the laptop rather than a peak,
+    and `TestTheBoundaryOfAStackThatIsUp` reads what the kernel then enforces."""
     demo = service(DEMO_SERVICE)
 
     assert isinstance(demo["pids_limit"], int)
@@ -843,7 +839,6 @@ for line in open("/proc/self/status"):
 quota = first("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
 period = first("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
 print(json.dumps({{
-    "uid": os.getuid(),
     "capabilities": {{name: status[name] for name in {CAPABILITY_SETS!r}}},
     "no_new_privs": status.get("NoNewPrivs"),
     "writes": {{directory: probe(directory) for directory in {PROBED_DIRECTORIES!r}}},
@@ -852,8 +847,7 @@ print(json.dumps({{
     "cpu_max": first("/sys/fs/cgroup/cpu.max") or (quota and period and quota + " " + period),
 }}))
 """
-"""What the running container's kernel says: who the process is, its four capability masks,
-whether it can gain a privilege at exec, which directories accept a write, and the process,
+"""What the running container's kernel says: the process's four capability masks, whether it can gain a privilege at exec, which directories accept a write, and the process,
 memory and CPU limits its cgroup enforces (cgroup v2 first, v1 where that is what there is)."""
 
 UNLIMITED = "max"
@@ -861,16 +855,19 @@ UNLIMITED = "max"
 
 
 def enforced_processes(kernel: dict) -> int | None:
+    """The cgroup's process limit, or None where there is none."""
     value = kernel["pids_max"]
     return None if value in (None, UNLIMITED) else int(value)
 
 
 def enforced_memory(kernel: dict) -> int | None:
+    """The cgroup's memory limit in bytes, or None where there is none."""
     value = kernel["memory_max"]
     return None if value in (None, UNLIMITED) or int(value) >= 2**62 else int(value)
 
 
 def enforced_cpus(kernel: dict) -> float | None:
+    """The cgroup's CPU limit as a count of CPUs, or None where there is none."""
     if not kernel["cpu_max"]:
         return None
     quota, period = kernel["cpu_max"].split()
@@ -900,9 +897,6 @@ def kernel() -> dict:
 class TestTheBoundaryOfAStackThatIsUp:
     """With `docker compose up -d` done: the controls the default run reads off the compose
     file, as the kernel of the machine giving the demo actually enforces them (story 23)."""
-
-    def test_the_container_runs_as_the_user_the_dockerfile_created(self, kernel):
-        assert kernel["uid"] == run_user_id()
 
     def test_the_root_filesystem_refuses_a_write_even_where_the_user_owns_it(self, kernel):
         """/app is the Run user's own; only a read-only root can refuse it a write there."""

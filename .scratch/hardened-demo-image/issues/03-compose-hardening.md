@@ -24,21 +24,23 @@ Verified on this laptop against the real OPS project:
 
 - **Default run.** The container checks read each control off the compose file: the capability
   drop, the security option, the read-only root, exactly three tmpfs mounts and no volume, the
-  uid, gid and mode on the two the user owns, a size on each, and each limit with headroom over
-  the measured peak. `test_container.py` is 54 passed, 18 skipped with no stack up.
-- **Opt-in.** `DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py`: 81 passed, 1 skipped
+  uid, gid and mode on the two the user owns, a size on each, and the process and memory limits with headroom
+  over their measured peaks. `test_container.py` is 54 passed, 27 skipped with no stack up.
+- **Opt-in.** `DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py`: 80 passed, 1 skipped
   (the named-certificate case, since the placeholder was built). Inside the running container the
-  kernel says uid 1000, all four capability masks `0000000000000000`, `NoNewPrivs: 1`, a write to
+  Receiver runs as uid 1000, all four capability masks are `0000000000000000`, `NoNewPrivs: 1`, a write to
   `/app` refused with `Read-only file system` (the user owns `/app`, so only the read-only root
   can be what refuses it), a write to each of the three tmpfs accepted, and the cgroup limits
   256 processes, 2 GiB and 2 CPUs.
 - **Lifecycle.** `python3 -m grafana_jsm_sandbox.reset`, then `DEMO_END_TO_END=1
   DEMO_RECEIVER_URL=http://localhost:8080 python3 -m pytest tests/test_end_to_end.py` passed in
-  103s. OPS-18: three Runs exiting 0 in 21.17s, 30.06s and 37.92s, opened, commented, then
+  103s. The entrypoint had written the onboarding flag on the tmpfs home first: `/home/demo`
+  is the user's own, mode 700, and `.claude/.claude.json` in it, mode 600, reads
+  `hasCompletedOnboarding: true`. OPS-18: three Runs exiting 0 in 21.17s, 30.06s and 37.92s, opened, commented, then
   Completed; cleanup left it Closed. No `[DENIED]`, nothing on stderr. Sampled every 0.7s
   through the run, the cgroup held at most **24 tasks** (processes and threads together) and
   peaked at **227 MB** (`memory.max_usage_in_bytes`). The offline suite is 226 passed,
-  37 skipped; ruff is clean; mypy's three findings are the pre-existing ones.
+  36 skipped; ruff is clean; mypy's three findings are the pre-existing ones.
 
 Four things worth recording:
 
@@ -66,9 +68,35 @@ Four things worth recording:
   The lifecycle ran clean under it.
 - **The process limit counts threads.** The peak of 24 is tasks, not processes, and a 0.7s
   sample misses the moment a Bash tool call forks. The guide's example uses 100; 256 is that
-  with room for what the sample misses, and the sizing check holds each limit to at least four
-  times the measured peak so a smaller limit someday has to argue with the number.
+  with room for what the sample misses, and the sizing check holds the process and memory limits to at
+  least four times their measured peaks so a smaller limit someday has to argue with the number.
 
 Not done here, by design: a container-level egress allowlist and a custom seccomp profile
 (Docker's default profile is what runs), both recorded in the spec as the next steps, and
 tickets 04 and 05.
+
+## What the review changed
+
+The standards review caught one vocabulary breach, "Grafana's webhook" in the new spoken point
+where CONTEXT.md says Notification, and two claims the files did not bear out: the spoken point
+credited the compose file with the non-root user and the credential proxy, which are the
+Dockerfile's and the Forwarder's, and the sizing test's docstring and this ticket said every
+limit had headroom over a measured peak when only the process and memory limits do (the CPU
+limit is a share of the laptop, not a peak). Both reviews caught the default run's skip count,
+recorded here from a run before the opt-in checks existed. All four are fixed. Its judgement
+calls: the last-USER list comprehension now has one home, `run_user()`, which the two older
+tests use too, and `useradd_arguments()` shares `run_commands()` with `apt_packages()` instead of
+repeating its walk; the helpers without docstrings have them; the capability docstring says four
+of five masks. One call was wrong and stands as it was: an assert's message is evaluated only
+when the assert fails, so `not_applied()` spawns no `docker compose version` on a passing run.
+It also noticed CONTEXT.md still described the Skill as mounted into the container, a fact
+ticket 01 changed; the glossary now says copied into the image.
+
+The spec review confirmed all four checklist items against the files and found the recorded
+outcome accurate but for the skip count. Its two flags are recorded above as deliberate: the
+opt-in checks ask more of the kernel than the spec's list (the capability masks, NoNewPrivs,
+the cgroup limits) because story 23 is that the claim on the slide was verified on the machine
+giving the demo; and on this laptop two of the three limits hold only through the `docker
+update` stopgap until Docker Desktop is upgraded, which the runbook now says. The exact-uid
+opt-in check it found redundant with the existing non-root check is removed, and the
+onboarding flag it noted as unrecorded is recorded above.

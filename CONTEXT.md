@@ -37,7 +37,7 @@ One headless Claude invocation, started by the Receiver for exactly one Notifica
 _Avoid_: harness, agent, session, job
 
 **Skill**:
-The one file in this repo, mounted into the container, that tells a Run the OPS facts and how to
+The one file in this repo, copied into the image, that tells a Run the OPS facts and how to
 act on an Alert. A Run reads it and nothing else instructs it.
 _Avoid_: prompt, playbook, instructions, runbook
 

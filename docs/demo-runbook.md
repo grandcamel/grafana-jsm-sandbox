@@ -245,18 +245,18 @@ nothing afterwards (ADR 0002). Show `RunSpawner` in
 [`grafana_jsm_sandbox/run_spawner.py`](../grafana_jsm_sandbox/run_spawner.py) if asked how.
 
 **The container is the boundary, in the shape Anthropic's guide gives it.** The demo service
-runs the way Anthropic's secure-deployment guide says to run a headless agent, and the compose
-file is the whole list: every capability dropped, no new privileges, a read-only root with
-tmpfs for the three directories a Run writes, a process limit, a memory and a CPU limit, a
-non-root user, no Docker socket, and credentials behind a proxy. Say which is whose. All of
-those controls are the guide's, and the Forwarder is the guide's credential-proxy
-recommendation done for Jira. This repo's own are the image carrying nothing but Claude Code
-and `jira-as` (ADR 0005), the sizes of the limits, the sentinel the Forwarder swaps, and the
-`dontAsk` permission mode with its two-tool allow list, which the guide is explicit is not what
-keeps an agent in. Two things the guide has that the demo does not: a custom seccomp profile
-(Docker's default one is what runs) and `--network none`, because the Receiver must accept
-Grafana's webhook and reach Jira and Anthropic; an egress allowlist of exactly those hosts is
-the next step, not what is running. The pre-demo check read every control back from the
+runs the way Anthropic's secure-deployment guide says to run a headless agent, and the list is
+short: every capability dropped, no new privileges, a read-only root with tmpfs for the three
+directories a Run writes, a process limit, a memory and a CPU limit, all declared in the compose
+file; a non-root user, from the Dockerfile; no Docker socket; and credentials behind a proxy,
+which is the Forwarder. Say which is whose. All of those controls are the guide's, the
+Forwarder being its credential-proxy recommendation done for Jira. This repo's own are the
+image carrying nothing but Claude Code and `jira-as` (ADR 0005), the sizes of the limits, the
+sentinel the Forwarder swaps, and the `dontAsk` permission mode with its two-tool allow list,
+which the guide is explicit is a permission gate and not a boundary. Two things the guide has
+that the demo does not: a custom seccomp profile (Docker's default one is what runs) and
+`--network none`, because the Receiver must accept Grafana's Notifications and reach Jira and
+Anthropic; an egress allowlist of exactly those hosts is the next step, not what is running. The pre-demo check read every control back from the
 container's kernel; the one-liner, in the hidden shell, prints `Read-only file system` from
 inside the directory the Run user owns:
 
