@@ -12,11 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from grafana_jsm_sandbox.notification import (
+    NOTIFICATION_FILENAME,
     InvalidNotification,
     validate_notification,
 )
-
-NOTIFICATION_FILENAME = "notification.json"
 
 logger = logging.getLogger(__name__)
 

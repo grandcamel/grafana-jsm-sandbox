@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import json
 
+NOTIFICATION_FILENAME = "notification.json"
+"""What the Receiver calls the Notification in a Run's working directory."""
+
 REQUIRED_ALERT_FIELDS = ("fingerprint", "status")
 
 

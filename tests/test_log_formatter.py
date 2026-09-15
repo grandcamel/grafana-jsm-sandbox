@@ -16,7 +16,13 @@ from dataclasses import dataclass
 
 import pytest
 
-from grafana_jsm_sandbox.log_formatter import format_event, format_stream
+from grafana_jsm_sandbox.log_formatter import (
+    DIAGNOSTIC,
+    RESULT,
+    RUN,
+    format_event,
+    format_stream,
+)
 from tests.conftest import FIXTURES
 
 REPO_ROOT = FIXTURES.parent
@@ -378,3 +384,32 @@ def test_command_line_entry_renders_the_recorded_transcript(argv, stdin):
     assert lines[0].startswith("[run]")
     assert "[DENIED] Bash: ls /etc" in lines
     assert lines[-1].startswith("[result] success in ")
+
+
+def test_a_rate_limit_event_is_not_worth_a_line():
+    """Every real Transcript carries these; none of them is news to an audience."""
+    assert format_event({"type": "rate_limit_event", "rate_limit": {"status": "allowed"}}) == []
+
+
+INCIDENT_TRANSCRIPT = FIXTURES / "run-transcript-repeat-firing.jsonl"
+"""A whole real Run: the repeat Firing that commented the trend and moved OPS-7 on."""
+
+
+def test_a_whole_real_run_renders_without_a_single_diagnostic():
+    """The Transcript a demo actually produces, rendered by the code a demo runs."""
+    lines = list(format_stream(INCIDENT_TRANSCRIPT.read_text().splitlines()))
+
+    unrendered = [line for line in lines if line.startswith(DIAGNOSTIC)]
+    assert not unrendered, f"the formatter did not understand a real Run: {unrendered}"
+
+    # The audience has to be able to read every jira-as command in full.
+    assert any("jira-as collaborate comment add OPS-7" in line for line in lines)
+    assert any("jira-as lifecycle transition OPS-7 --id 31" in line for line in lines)
+    assert lines[0].startswith(RUN)
+    assert lines[-1].startswith(RESULT)
+
+
+def test_a_whole_real_run_puts_nothing_credential_shaped_on_the_screen():
+    text = "\n".join(format_stream(INCIDENT_TRANSCRIPT.read_text().splitlines()))
+    assert "Authorization" not in text
+    assert "JIRA_API_TOKEN" not in text

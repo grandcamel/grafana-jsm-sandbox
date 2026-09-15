@@ -44,10 +44,10 @@
         "summary": "rolldice is receiving no traffic"
       },
       "values": {
-        "A": 0.0333,
+        "A": 0,
         "B": 1
       },
-      "valueString": "[ var='A' labels={service=rolldice} value=0.0333 ], [ var='B' labels={service=rolldice} value=1 ]"
+      "valueString": "[ var='A' labels={service=rolldice} value=0 ], [ var='B' labels={service=rolldice} value=1 ]"
     }
   ]
 }

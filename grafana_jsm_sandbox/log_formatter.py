@@ -216,11 +216,19 @@ def _render_result(event: dict) -> list[str]:
     return lines
 
 
+def _render_nothing(event: dict) -> list[str]:
+    """A Run event that is real and understood, and that an audience gains nothing from."""
+    return []
+
+
 _RENDERERS = {
     "system": _render_system,
     "assistant": _render_assistant,
     "user": _render_user,
     "result": _render_result,
+    # Rate-limit accounting arrives as its own Run event in every real Transcript.
+    # It is known, not unrecognised, so it costs no diagnostic line either.
+    "rate_limit_event": _render_nothing,
 }
 
 

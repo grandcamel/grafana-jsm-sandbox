@@ -60,6 +60,30 @@ python3 -m grafana_jsm_sandbox.log_formatter fixtures/run-transcript.jsonl
 
 Nothing pipes a live Run through it yet; the Receiver wires it up in ticket 05.
 
+The **skill** a Run follows, and the command line that starts one.
+
+[`skill/incident-sync/SKILL.md`](skill/incident-sync/SKILL.md) is the whole of what a Run knows
+about OPS: the Fingerprint label format, the match JQL, the field mapping, the lifecycle rule, and
+every operation written as a `jira-as` invocation, because nothing else will execute. It is short
+on purpose — it is meant to be read off a screen during the demo.
+
+`build_run_command` is the command line that starts one Run: print mode, `dontAsk`, an allow list
+of `Bash(jira-as *)` and `Read`, stream-json with `--verbose`, and the skill directory added so the
+Run can read it (ADR 0003). Print it to start a Run by hand:
+
+```bash
+python3 -m grafana_jsm_sandbox.run_command skill
+```
+
+Two things the permission boundary decides for the skill, both found by running it:
+
+- A `jira-as` command that is split across lines, carries a newline inside an argument, or uses
+  `$'...'` does not match the allow list and is denied whole. Every invocation in the skill is one
+  line of plain single quotes; the Description gets its paragraphs from one line of ADF instead.
+- A Run has no clock of its own — `date` is not on the allow list — so every duration it reports is
+  Jira's `serverTime` minus the Incident's `created`. Grafana's clock is never used for a duration,
+  which is also what keeps a replayed fixture from reporting a negative one.
+
 The **Forwarder** — the localhost process that holds the real Jira credential so a Run never does.
 
 A Run's environment points jira-as at the Forwarder over plain http, with a per-Run **sentinel**
@@ -98,8 +122,11 @@ Receiver owns the Forwarder and registers each Run's sentinel in ticket 05.
 | `grafana_jsm_sandbox/notification.py` | Validation of an incoming Notification |
 | `grafana_jsm_sandbox/log_formatter.py` | Rendering a Run's Transcript, and the redaction rules |
 | `grafana_jsm_sandbox/forwarder.py` | The Forwarder, the sentinel check and the Jira credential |
-| `fixtures/notification-firing.json` | A canned firing Notification for tests and demo fallback |
+| `grafana_jsm_sandbox/run_command.py` | The command line that starts one Run, and its allow list |
+| `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
+| `fixtures/notification-*.json` | The canned Notification sequence: firing, repeat, resolved |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
+| `fixtures/run-transcript-repeat-firing.jsonl` | A recorded Run that commented a trend on a real Incident |
 | `tests/` | pytest, driving a real Receiver and Forwarder over real HTTP on ephemeral ports |
 
 ## Running the tests
