@@ -22,9 +22,8 @@ execute one at a time in arrival order, so two Firings of the same Alert cannot 
 duplicate Incidents. The Receiver logs each Run's start, end, exit status and duration; a Run that
 blows up is logged and the next one still starts.
 
-The process that actually spawns a Run is injected into the `Receiver` at construction, so it is
-still a seam — the real Claude CLI invocation, the container and the Grafana provisioning are
-later tickets.
+The process that actually spawns a Run is injected into the `Receiver` at construction, so it
+stays a seam a test can substitute; the real spawner is `RunSpawner`, below.
 
 The **log formatter** — what turns a Run's Transcript into the log window the audience watches.
 
@@ -58,7 +57,7 @@ python3 -m grafana_jsm_sandbox.log_formatter fixtures/run-transcript.jsonl
 [result] success in 10.0s, 3 turns, $0.4527
 ```
 
-Nothing pipes a live Run through it yet; the Receiver wires it up in ticket 05.
+The Receiver pipes every live Run through it, one line at a time, as the Run produces it.
 
 The **skill** a Run follows, and the command line that starts one.
 
@@ -112,7 +111,50 @@ refused a GET /rest/api/3/myself with no valid sentinel
 
 It reads `JIRA_SITE_URL`, `JIRA_EMAIL` and `JIRA_API_TOKEN` from its own environment and fails at
 startup, naming every variable that is missing, rather than no-opping during the demo. The
-Receiver owns the Forwarder and registers each Run's sentinel in ticket 05.
+Receiver owns it, and the spawner below registers each Run's sentinel around that Run.
+
+The **Run spawner** — what the Receiver starts for each Notification, for real.
+
+`RunSpawner` builds the Run's environment from scratch rather than inheriting one: the Anthropic
+OAuth token, the Jira email, `JIRA_SITE_URL` pointing at the Forwarder over plain http,
+`JIRA_API_TOKEN` set to that Run's sentinel, and `PATH`. Nothing else — not the real Jira token,
+not whatever else the Receiver happened to be started with. The sentinel is registered with the
+Forwarder before the process starts and cleared the moment it ends, so a sentinel that turns up in
+a Transcript afterwards is worth nothing.
+
+The Run's stdout is its Transcript, rendered into the log by the formatter as it arrives. Its
+stderr is captured and logged only if it exits non-zero, redacted like every other line. A Run
+that outlives its timeout is killed and logged, and the queue behind it keeps moving.
+
+## Running the demo on the laptop
+
+The Receiver, the Forwarder and real Runs are one process — the container's main process in ticket
+06, and this on a laptop:
+
+```bash
+python3 -m grafana_jsm_sandbox
+```
+
+It refuses to start without a Jira credential and an Anthropic token, naming everything that is
+missing at once, so a half-filled env file is fixed in one pass rather than three restarts.
+
+| Variable | What it is |
+| --- | --- |
+| `JIRA_SITE_URL` | The real Atlassian site. Only the Forwarder ever sees it |
+| `JIRA_EMAIL` | The account the Forwarder acts as |
+| `JIRA_API_TOKEN` | The real token. It never reaches a Run |
+| `CLAUDE_CODE_OAUTH_TOKEN` | What a Run authenticates with. The one real credential it holds |
+| `RECEIVER_HOST` / `RECEIVER_PORT` | Where the Receiver listens. `0.0.0.0` and `8080` |
+| `RUNS_DIRECTORY` | Where each Run's working directory goes. `runs` |
+| `SKILL_DIRECTORY` | The skill a Run reads. This repo's `skill` |
+| `RUN_TIMEOUT` | Seconds before a stuck Run is killed. `300` |
+
+Then drive it with the canned Notification sequence — a Firing, a repeat Firing, a Resolved —
+which is also the demo's fallback if Grafana is uncooperative:
+
+```bash
+python3 -m grafana_jsm_sandbox.replay --receiver http://localhost:8080 --pause 30
+```
 
 ## Layout
 
@@ -123,6 +165,9 @@ Receiver owns the Forwarder and registers each Run's sentinel in ticket 05.
 | `grafana_jsm_sandbox/log_formatter.py` | Rendering a Run's Transcript, and the redaction rules |
 | `grafana_jsm_sandbox/forwarder.py` | The Forwarder, the sentinel check and the Jira credential |
 | `grafana_jsm_sandbox/run_command.py` | The command line that starts one Run, and its allow list |
+| `grafana_jsm_sandbox/run_spawner.py` | Starting one Run for real: its scrubbed environment, its sentinel |
+| `grafana_jsm_sandbox/replay.py` | Posting the canned Notification sequence at a Receiver |
+| `grafana_jsm_sandbox/__main__.py` | The whole process: configuration, the Forwarder, the Receiver |
 | `skill/incident-sync/SKILL.md` | The skill a Run follows to turn a Notification into Incidents |
 | `fixtures/notification-*.json` | The canned Notification sequence: firing, repeat, resolved |
 | `fixtures/run-transcript.jsonl` | A recorded Run Transcript, including a real denial |
@@ -135,4 +180,14 @@ Python 3.11 or newer; the runtime is standard library only, and pytest is the on
 
 ```bash
 python3 -m pytest
+```
+
+The default run is offline: no Jira, no model, nothing but real HTTP on ephemeral ports and real
+child processes. The one test that touches OPS is opt-in, and asserts by JQL that the canned
+sequence drove one Incident to `Completed` with its trend comments. It needs a Receiver already
+running and a `jira-as` credential in the shell, and it resolves and closes the Incident it
+watched on the way out:
+
+```bash
+DEMO_END_TO_END=1 python3 -m pytest tests/test_end_to_end.py
 ```

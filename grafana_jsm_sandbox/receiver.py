@@ -19,6 +19,11 @@ from grafana_jsm_sandbox.notification import (
 
 logger = logging.getLogger(__name__)
 
+SHUTDOWN_POLL_INTERVAL = 0.05
+"""How long `stop` may wait for the serving loop to notice it. The module's own default
+of half a second is time a container spends on the way down, and time a test suite pays
+for every server it starts."""
+
 
 @dataclass(frozen=True)
 class Run:
@@ -60,7 +65,10 @@ class Receiver:
         self._worker_thread = threading.Thread(target=self._work, name="receiver-runs", daemon=True)
         self._worker_thread.start()
         self._http_thread = threading.Thread(
-            target=self._server.serve_forever, name="receiver-http", daemon=True
+            target=self._server.serve_forever,
+            args=(SHUTDOWN_POLL_INTERVAL,),
+            name="receiver-http",
+            daemon=True,
         )
         self._http_thread.start()
 

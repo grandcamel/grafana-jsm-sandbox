@@ -1,0 +1,53 @@
+{
+  "receiver": "demo-receiver",
+  "status": "resolved",
+  "orgId": 1,
+  "version": "1",
+  "truncatedAlerts": 0,
+  "groupKey": "{}/{}:{alertname=\"rolldice request rate is zero\"}",
+  "title": "[RESOLVED] rolldice request rate is zero",
+  "state": "ok",
+  "externalURL": "http://localhost:3000/",
+  "groupLabels": {
+    "alertname": "rolldice request rate is zero"
+  },
+  "commonLabels": {
+    "alertname": "rolldice request rate is zero",
+    "grafana_folder": "demo",
+    "instance": "rolldice:8080",
+    "service": "rolldice",
+    "severity": "critical"
+  },
+  "commonAnnotations": {
+    "description": "The rolldice request rate has fallen below one request per 30 seconds.",
+    "summary": "rolldice is receiving no traffic"
+  },
+  "alerts": [
+    {
+      "status": "resolved",
+      "fingerprint": "a1b2c3d4e5f60718",
+      "startsAt": "2026-09-15T16:40:12Z",
+      "endsAt": "2026-09-15T16:45:42Z",
+      "generatorURL": "http://localhost:3000/alerting/grafana/rolldice-rate-zero/view",
+      "silenceURL": "http://localhost:3000/alerting/silence/new",
+      "dashboardURL": "http://localhost:3000/d/rolldice-overview/rolldice-overview",
+      "panelURL": "http://localhost:3000/d/rolldice-overview/rolldice-overview?viewPanel=2",
+      "labels": {
+        "alertname": "rolldice request rate is zero",
+        "grafana_folder": "demo",
+        "instance": "rolldice:8080",
+        "service": "rolldice",
+        "severity": "critical"
+      },
+      "annotations": {
+        "description": "The rolldice request rate has fallen below one request per 30 seconds.",
+        "summary": "rolldice is receiving no traffic"
+      },
+      "values": {
+        "A": 4.7,
+        "B": 0
+      },
+      "valueString": "[ var='A' labels={service=rolldice} value=4.7 ], [ var='B' labels={service=rolldice} value=0 ]"
+    }
+  ]
+}

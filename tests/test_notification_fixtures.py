@@ -14,14 +14,8 @@ import json
 import pytest
 
 from grafana_jsm_sandbox.notification import validate_notification
+from grafana_jsm_sandbox.replay import SEQUENCE
 from tests.conftest import FIXTURES
-
-SEQUENCE = (
-    "notification-firing.json",
-    "notification-firing-repeat.json",
-    "notification-resolved.json",
-)
-"""The canned Notifications, in the order a demo replays them."""
 
 
 def canned(filename: str) -> dict:

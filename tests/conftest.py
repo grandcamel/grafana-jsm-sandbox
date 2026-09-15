@@ -180,12 +180,14 @@ def receiver(spawner, tmp_path):
         receiver.stop()
 
 
-def wait_for_log(caplog, substring: str, timeout: float = 5.0) -> str:
-    """Wait until a log line containing `substring` has been emitted; return the log text."""
+def wait_for_log(caplog, substring: str, count: int = 1, timeout: float = 5.0) -> str:
+    """Wait until `substring` has been logged `count` times; return the log text."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         text = caplog.text
-        if substring in text:
+        if text.count(substring) >= count:
             return text
         time.sleep(0.01)
-    raise AssertionError(f"no log line containing {substring!r}; log was:\n{caplog.text}")
+    raise AssertionError(
+        f"expected {count} log lines containing {substring!r}; log was:\n{caplog.text}"
+    )

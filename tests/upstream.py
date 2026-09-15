@@ -11,6 +11,8 @@ import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from grafana_jsm_sandbox.forwarder import SHUTDOWN_POLL_INTERVAL
+
 
 @dataclass
 class UpstreamRequest:
@@ -54,7 +56,10 @@ class FakeUpstream:
 
     def start(self) -> None:
         self._thread = threading.Thread(
-            target=self._server.serve_forever, name="fake-upstream", daemon=True
+            target=self._server.serve_forever,
+            args=(SHUTDOWN_POLL_INTERVAL,),
+            name="fake-upstream",
+            daemon=True,
         )
         self._thread.start()
 

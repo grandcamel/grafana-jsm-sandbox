@@ -55,6 +55,11 @@ _HEADERS_NOT_SENT_BACK = HOP_BY_HOP_HEADERS | {"content-length"}
 UPSTREAM_TIMEOUT = 30
 """Seconds to wait on the Atlassian site before a Run is told the gateway failed."""
 
+SHUTDOWN_POLL_INTERVAL = 0.05
+"""How long `stop` may wait for the serving loop to notice it. The module's own default
+of half a second is time a container spends on the way down, and time a test suite pays
+for every server it starts."""
+
 _TEXT = {"Content-Type": "text/plain; charset=utf-8"}
 """The headers on an answer the Forwarder writes itself rather than forwarding."""
 
@@ -121,7 +126,10 @@ class Forwarder:
 
     def start(self) -> None:
         self._thread = threading.Thread(
-            target=self._server.serve_forever, name="forwarder", daemon=True
+            target=self._server.serve_forever,
+            args=(SHUTDOWN_POLL_INTERVAL,),
+            name="forwarder",
+            daemon=True,
         )
         self._thread.start()
 
