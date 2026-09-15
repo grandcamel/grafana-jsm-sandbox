@@ -33,6 +33,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from grafana_jsm_sandbox.project import project_from_environment
 from grafana_jsm_sandbox.replay import DEFAULT_RECEIVER, replay
 from grafana_jsm_sandbox.reset import CLOSED, COMPLETED, RESOLUTION, move_to, run_jira_as, search
 from tests.conftest import firing_notification
@@ -55,7 +56,11 @@ PAUSE = 10.0
 POLL = 5.0
 """Seconds between looks at OPS, which is a real site and not to be hammered."""
 
-LABELLED = 'project = OPS AND issuetype = Incident AND labels = "{label}"'
+PROJECT = project_from_environment()
+"""The project the demo was started for: OPS unless the shell's `JIRA_PROJECT` says otherwise,
+the same variable the container read from `.env`."""
+
+LABELLED = f'project = {PROJECT} AND issuetype = Incident AND labels = "{{label}}"'
 """Every Incident ever created for this Fingerprint, in any status."""
 
 MATCH = LABELLED + " AND statusCategory != Done"

@@ -89,3 +89,9 @@ def test_a_relative_skill_directory_is_made_absolute(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     command = build_run_command(Path("skill"))
     assert value_of(command, "--add-dir") == str(tmp_path / "skill")
+
+
+def test_the_run_is_asked_to_report_on_the_project_it_was_configured_for():
+    """The Skill it reads names that project too; the prompt must not contradict it."""
+    assert "what changed in OPS" in build_run_command(SKILL_DIRECTORY)[-1]
+    assert "what changed in SIEM" in build_run_command(SKILL_DIRECTORY, project="SIEM")[-1]

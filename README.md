@@ -18,9 +18,10 @@ sandboxed boundary looks like when the audience may ask what else the Run can re
   2.2 and `cpus` from 2.17; an older one silently leaves them off, and the runbook says how to
   tell and what to do meanwhile.
 - **A Jira Cloud site with a Jira Service Management project created from the ITSM template.**
-  The Skill and the tests call it `OPS` and use its Incident issue type, and an API token for
-  an account on that site is what the Forwarder holds. ADR 0004 records the project template key
-  that created ours.
+  The Skill is written for a project called `OPS` and uses its Incident issue type; a project
+  with another key is one setting, `JIRA_PROJECT`, read by the container, the reset and the
+  end-to-end check alike. An API token for an account on that site is what the Forwarder
+  holds. ADR 0004 records the project template key that created ours.
 - **A Claude Code OAuth token**, from `claude setup-token` on a machine where Claude Code is
   logged in. It is the one credential a Run really holds.
 - **`jira-as` in your own shell**, the Jira Assistant CLI 2.x, with the same Jira credential in
@@ -107,7 +108,11 @@ on purpose — it is meant to be read off a screen during the demo.
 
 `build_run_command` is the command line that starts one Run: print mode, `dontAsk`, an allow list
 of `Bash(jira-as *)` and `Read`, stream-json with `--verbose`, and the skill directory added so the
-Run can read it (ADR 0003). Print it to start a Run by hand:
+Run can read it (ADR 0003). The Skill names one project, `OPS`, in every invocation, because each
+must be runnable as written; for a project with another key the Receiver copies the skill
+directory once at startup with the key rewritten, points every Run at the copy, and holds each
+Run's `jira-as` to that project through its allowlist variable. Print the command to start a Run
+by hand:
 
 ```bash
 python3 -m grafana_jsm_sandbox.run_command skill
@@ -184,6 +189,7 @@ missing at once, so a half-filled env file is fixed in one pass rather than thre
 | `JIRA_EMAIL` | The account the Forwarder acts as |
 | `JIRA_API_TOKEN` | The real token. It never reaches a Run |
 | `CLAUDE_CODE_OAUTH_TOKEN` | What a Run authenticates with. The one real credential it holds |
+| `JIRA_PROJECT` | The project the Runs act on. `OPS`, the one the Skill is written for; any other key has the Skill rendered for it at startup |
 | `RECEIVER_HOST` / `RECEIVER_PORT` | Where the Receiver listens. `0.0.0.0` and `8080` |
 | `RUNS_DIRECTORY` | Where each Run's working directory goes. `runs` |
 | `SKILL_DIRECTORY` | The skill a Run reads. This repo's `skill` |

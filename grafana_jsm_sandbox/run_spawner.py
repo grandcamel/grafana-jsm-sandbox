@@ -26,6 +26,7 @@ from typing import IO, cast
 
 from grafana_jsm_sandbox.forwarder import ENVIRONMENT_VARIABLES, Forwarder
 from grafana_jsm_sandbox.log_formatter import format_stream, redact
+from grafana_jsm_sandbox.project import ALLOWED_PROJECTS_VARIABLE, DEFAULT_PROJECT
 from grafana_jsm_sandbox.receiver import Run
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,8 @@ class RunSpawner:
     forwarder: Forwarder
     anthropic_token: str
     jira_email: str
+    project: str = DEFAULT_PROJECT
+    """The one project a Run may touch: the key the Skill it reads was rendered for."""
     timeout: float = RUN_TIMEOUT
     path: str = field(default_factory=lambda: os.environ.get("PATH", os.defpath))
     trust_store: Mapping[str, str] = field(default_factory=trust_store_from_environment)
@@ -167,7 +170,9 @@ class RunSpawner:
         among them: the Claude CLI falls back to the account's home directory,
         and leaving it out keeps the list short enough to read aloud. The trust
         store is the one thing carried over from the Receiver's own environment,
-        and only when the Receiver has one.
+        and only when the Receiver has one. The project allowlist is jira-as's
+        own variable, set to the one project so that a Run started in a directory
+        with no settings file is held to it the way the laptop's shell is.
         """
         return {
             **self.trust_store,
@@ -176,6 +181,7 @@ class RunSpawner:
             ENVIRONMENT_VARIABLES["email"]: self.jira_email,
             ENVIRONMENT_VARIABLES["api_token"]: sentinel,
             SITE_OPERATIONS_VARIABLE: "true",
+            ALLOWED_PROJECTS_VARIABLE: self.project,
             "PATH": self.path,
         }
 

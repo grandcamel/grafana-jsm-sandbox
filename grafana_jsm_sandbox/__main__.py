@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import tempfile
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -25,6 +26,12 @@ from pathlib import Path
 from typing import TypeVar
 
 from grafana_jsm_sandbox.forwarder import Forwarder, IncompleteJiraCredential, JiraCredential
+from grafana_jsm_sandbox.project import (
+    DEFAULT_PROJECT,
+    InvalidProjectKey,
+    project_from_environment,
+    render_skill,
+)
 from grafana_jsm_sandbox.receiver import Receiver
 from grafana_jsm_sandbox.run_command import build_run_command
 from grafana_jsm_sandbox.run_spawner import (
@@ -44,7 +51,8 @@ RUNS_DIRECTORY_VARIABLE = "RUNS_DIRECTORY"
 SKILL_DIRECTORY_VARIABLE = "SKILL_DIRECTORY"
 RUN_TIMEOUT_VARIABLE = "RUN_TIMEOUT"
 """What the container sets to place the demo; the credential variables are the Forwarder's
-and the spawner's. Every one of these has a default that works on a laptop."""
+and the spawner's, and the project key is `JIRA_PROJECT`, read in `project`. Every one of
+these has a default that works on a laptop."""
 
 DEFAULT_HOST = "0.0.0.0"
 """Grafana reaches the Receiver from another container; the Forwarder is the loopback one."""
@@ -74,6 +82,9 @@ class Settings:
     runs_directory: Path
     skill_directory: Path
     run_timeout: float
+    project: str = DEFAULT_PROJECT
+    """The Jira project the Runs act on. The committed Skill names the default; any other
+    key gets the Skill rendered for it at startup (`skill_directory_for`)."""
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None) -> Settings:
@@ -94,6 +105,11 @@ class Settings:
             anthropic_token = anthropic_token_from_environment(environment)
         except MissingAnthropicToken as failure:
             failures.append(str(failure))
+        project = DEFAULT_PROJECT
+        try:
+            project = project_from_environment(environment)
+        except InvalidProjectKey as failure:
+            failures.append(str(failure))
         port = _number(environment, PORT_VARIABLE, DEFAULT_PORT, int, failures)
         run_timeout = _number(environment, RUN_TIMEOUT_VARIABLE, RUN_TIMEOUT, float, failures)
         if failures or credential is None:
@@ -108,18 +124,29 @@ class Settings:
                 environment, SKILL_DIRECTORY_VARIABLE, DEFAULT_SKILL_DIRECTORY
             ),
             run_timeout=run_timeout,
+            project=project,
         )
+
+
+def skill_directory_for(settings: Settings, scratch: Path) -> Path:
+    """The skill directory the Runs read: the committed one for the project it is written
+    for, otherwise a copy under `scratch` with the key rewritten, made once for every Run."""
+    if settings.project == DEFAULT_PROJECT:
+        return settings.skill_directory
+    return render_skill(settings.skill_directory, settings.project, scratch / "skill")
 
 
 def serve(settings: Settings) -> int:
     """Start the Forwarder and the Receiver, and serve Notifications until interrupted."""
+    skill_directory = skill_directory_for(settings, Path(tempfile.mkdtemp(prefix="skill-for-")))
     forwarder = Forwarder(settings.credential)
     forwarder.start()
     receiver = Receiver(
         spawn_run=RunSpawner(
-            command=build_run_command(settings.skill_directory),
+            command=build_run_command(skill_directory, settings.project),
             forwarder=forwarder,
             anthropic_token=settings.anthropic_token,
+            project=settings.project,
             # The email, and only the email. The spawner is handed the one part of
             # the credential a Run is allowed to hold, rather than the credential
             # it would then have to be trusted not to pass on (ADR 0002).
@@ -136,6 +163,9 @@ def serve(settings: Settings) -> int:
         "runs reach %s as %s through the Forwarder, holding a sentinel",
         settings.credential.site_url,
         settings.credential.email,
+    )
+    logger.info(
+        "runs act on project %s, reading the skill at %s", settings.project, skill_directory
     )
     try:
         threading.Event().wait()

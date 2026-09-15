@@ -22,7 +22,10 @@ does; right column is what the audience believes.
 
 `<your-site>` and `<queue-id>` are yours to fill in: open the OPS project's **Queues**, click
 **Incidents**, and the address bar has both. The queue id is that queue's own and differs on
-every site, so bookmark the address the day before rather than typing it live.
+every site, so bookmark the address the day before rather than typing it live. A site whose
+project is not called `OPS` is one line in `.env`, `JIRA_PROJECT=<key>`, exported in the
+presenter's shell as well so the reset and the end-to-end check act on the same project; the
+queue address then names that key instead.
 
 Reload the queue and the Grafana list by hand when the log says a Run has finished. Neither
 refreshes fast enough on its own to be trusted during the demo.

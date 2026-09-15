@@ -37,6 +37,7 @@ from grafana_jsm_sandbox.__main__ import (
 )
 from grafana_jsm_sandbox.forwarder import ENVIRONMENT_VARIABLES
 from grafana_jsm_sandbox.log_formatter import redact
+from grafana_jsm_sandbox.project import PROJECT_VARIABLE
 from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE, TRUST_STORE_VARIABLES
 from tests.conftest import REPOSITORY, compose, needs_the_stack_up
 
@@ -83,6 +84,7 @@ SETTINGS_VARIABLES = (
     RUNS_DIRECTORY_VARIABLE,
     SKILL_DIRECTORY_VARIABLE,
     RUN_TIMEOUT_VARIABLE,
+    PROJECT_VARIABLE,
 )
 """Every variable the process reads at all, which is what the example must list."""
 

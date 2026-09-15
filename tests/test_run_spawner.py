@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from grafana_jsm_sandbox.notification import NOTIFICATION_FILENAME
+from grafana_jsm_sandbox.project import ALLOWED_PROJECTS_VARIABLE
 from grafana_jsm_sandbox.receiver import Receiver, Run
 from grafana_jsm_sandbox.run_spawner import (
     ANTHROPIC_TOKEN_VARIABLE,
@@ -48,6 +49,7 @@ A_RUNS_VARIABLES = {
     "JIRA_SITE_URL",
     "JIRA_API_TOKEN",
     SITE_OPERATIONS_VARIABLE,
+    ALLOWED_PROJECTS_VARIABLE,
     "PATH",
 }
 """Everything a Run is started with when the Receiver has no trust store to hand on."""
@@ -198,6 +200,16 @@ def test_the_run_holds_a_sentinel_where_the_jira_token_would_be(forwarder, run):
     assert environment["JIRA_EMAIL"] == REAL_EMAIL
     assert environment["JIRA_API_TOKEN"] not in ("", REAL_TOKEN)
     assert environment[ANTHROPIC_TOKEN_VARIABLE] == ANTHROPIC_TOKEN
+
+
+def test_the_run_may_touch_the_configured_project_and_no_other(forwarder, run):
+    """jira-as reads its allowlist from the environment over any settings file, and a
+    Run's working directory has none: this is what keeps a Run to the one project."""
+    spawner_for(_program(DUMP_ENVIRONMENT), forwarder)(run)
+    assert environment_of(run)[ALLOWED_PROJECTS_VARIABLE] == "OPS"
+
+    spawner_for(_program(DUMP_ENVIRONMENT), forwarder, project="SIEM")(run)
+    assert environment_of(run)[ALLOWED_PROJECTS_VARIABLE] == "SIEM"
 
 
 def test_the_run_can_read_jiras_clock(forwarder, run):
