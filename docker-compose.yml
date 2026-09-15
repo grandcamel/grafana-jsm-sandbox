@@ -14,6 +14,11 @@
 #
 # No Docker socket is mounted anywhere, and no credential is written here: the
 # demo service reads .env, which git ignores and the build context refuses.
+#
+# On a laptop behind an intercepting proxy, name the corporate root CA (PEM, in
+# the certs directory, which git ignores) and both builds trust it (ticket 02):
+#
+#     EXTRA_CA_CERT=certs/corporate-root.crt docker compose build
 
 services:
   lgtm:
@@ -39,6 +44,8 @@ services:
   demo:
     build:
       context: .
+      args:
+        EXTRA_CA_CERT: ${EXTRA_CA_CERT:-certs/NO_EXTRA_CERTS}
     image: grafana-jsm-sandbox:latest
     # The Jira credential and the Anthropic token, from a file git never takes.
     env_file:
@@ -74,7 +81,12 @@ services:
   # up throughout; only its traffic comes and goes.
   rolldice:
     build:
-      context: docker/rolldice
+      # The repo root, so that the certificate argument names the same file for
+      # both images; the Dockerfile copies its two files from under docker/rolldice.
+      context: .
+      dockerfile: docker/rolldice/Dockerfile
+      args:
+        EXTRA_CA_CERT: ${EXTRA_CA_CERT:-certs/NO_EXTRA_CERTS}
     image: grafana-jsm-sandbox-rolldice:latest
     environment:
       OTEL_SERVICE_NAME: rolldice

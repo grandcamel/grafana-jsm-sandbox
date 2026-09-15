@@ -11,6 +11,7 @@
 # 0003) and the sentinel in its environment (ADR 0002), not anything installed here.
 #
 #     docker compose build
+#     EXTRA_CA_CERT=certs/corporate-root.crt docker compose build    # behind a proxy
 #
 # The base is pinned to the tag the demo was rehearsed on. Node 22.15 or newer is
 # required: that is the runtime from which Claude Code reads the operating system
@@ -36,6 +37,34 @@ RUN userdel -r node \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# An optional corporate CA, for a laptop behind an intercepting proxy such as
+# Zscaler (ticket 02). The argument names a PEM file in the build context; the
+# default is a committed placeholder that is intentionally empty, and with it the
+# build is exactly the one above. A named certificate goes into the system trust
+# store here, before anything below reaches npm or PyPI through that proxy, and a
+# file that is not PEM stops the build now rather than as a TLS error three
+# layers down.
+ARG EXTRA_CA_CERT=certs/NO_EXTRA_CERTS
+COPY ${EXTRA_CA_CERT} /tmp/extra-ca.crt
+RUN if [ -s /tmp/extra-ca.crt ]; then \
+        grep -q "BEGIN CERTIFICATE" /tmp/extra-ca.crt \
+            || { echo "EXTRA_CA_CERT is not a PEM certificate" >&2; exit 1; }; \
+        install -m 644 /tmp/extra-ca.crt /usr/local/share/ca-certificates/extra-ca.crt \
+        && update-ca-certificates; \
+    fi \
+    && rm -f /tmp/extra-ca.crt
+
+# Every TLS client the image carries, pointed at that one bundle, image-wide and
+# before the installs that need them: Python's ssl module and so the Forwarder's
+# urllib, the requests library jira-as uses, pip, curl-style clients, and Claude
+# Code, which documents NODE_EXTRA_CA_CERTS as its custom-CA setting. The Receiver
+# hands exactly these five on to each Run, and nothing else new (ADR 0002).
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # A Run's Transcript is what the audience reads and the formatter renders its
 # Run event shapes, so Claude Code is pinned to the version the container was

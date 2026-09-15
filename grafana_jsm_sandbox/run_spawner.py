@@ -20,7 +20,7 @@ import secrets
 import signal
 import subprocess
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import IO, cast
 
@@ -46,6 +46,23 @@ this, a Run outside a tree holding a jira-as settings file cannot read the time 
 It gates which calls jira-as will make, not what the credential behind the Forwarder can reach,
 so it widens nothing: the boundary is the sentinel and the allow list."""
 
+TRUST_STORE_VARIABLES = (
+    "SSL_CERT_FILE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "PIP_CERT",
+    "NODE_EXTRA_CA_CERTS",
+)
+"""What the image sets, image-wide, so that every TLS client in it trusts the system bundle
+and whatever corporate CA was installed into it at build time (ticket 02). A Run inherits
+exactly these from the Receiver, when the Receiver has them: on a laptop behind an
+intercepting proxy its Anthropic traffic goes through the same proxy the build did, and
+Claude Code reads `NODE_EXTRA_CA_CERTS` for the CA. Its Jira traffic needs none of them,
+because that goes to the Forwarder over loopback in plain HTTP.
+
+They are the only thing a Run inherits: the environment is still built from scratch, and
+the real Jira token still never reaches it (ADR 0002)."""
+
 SENTINEL_BYTES = 24
 """How much randomness each Run's sentinel carries."""
 
@@ -70,6 +87,12 @@ def anthropic_token_from_environment(environment=None) -> str:
     return token
 
 
+def trust_store_from_environment(environment: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The trust-store variables the Receiver was started with, and only those that are set."""
+    environment = os.environ if environment is None else environment
+    return {name: environment[name] for name in TRUST_STORE_VARIABLES if name in environment}
+
+
 @dataclass(frozen=True)
 class RunSpawner:
     """Starts one Run as a child process and renders its Transcript into the log.
@@ -84,6 +107,7 @@ class RunSpawner:
     jira_email: str
     timeout: float = RUN_TIMEOUT
     path: str = field(default_factory=lambda: os.environ.get("PATH", os.defpath))
+    trust_store: Mapping[str, str] = field(default_factory=trust_store_from_environment)
 
     def __call__(self, run: Run) -> int:
         """Run one Run to completion and return its exit status."""
@@ -141,9 +165,12 @@ class RunSpawner:
         The Jira variables are the ones jira-as reads, so a Run needs no patching
         to talk to the Forwarder — it only ever holds the sentinel. HOME is not
         among them: the Claude CLI falls back to the account's home directory,
-        and leaving it out keeps the list short enough to read aloud.
+        and leaving it out keeps the list short enough to read aloud. The trust
+        store is the one thing carried over from the Receiver's own environment,
+        and only when the Receiver has one.
         """
         return {
+            **self.trust_store,
             ANTHROPIC_TOKEN_VARIABLE: self.anthropic_token,
             ENVIRONMENT_VARIABLES["site_url"]: self.forwarder.url,
             ENVIRONMENT_VARIABLES["email"]: self.jira_email,

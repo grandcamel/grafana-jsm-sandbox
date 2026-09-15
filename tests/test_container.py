@@ -14,11 +14,15 @@ end-to-end check, because they cost a build and a demo:
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import shutil
+import ssl
 import subprocess
 import urllib.request
+from pathlib import Path
 
 import pytest
 import yaml
@@ -33,7 +37,7 @@ from grafana_jsm_sandbox.__main__ import (
 )
 from grafana_jsm_sandbox.forwarder import ENVIRONMENT_VARIABLES
 from grafana_jsm_sandbox.log_formatter import redact
-from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE
+from grafana_jsm_sandbox.run_spawner import ANTHROPIC_TOKEN_VARIABLE, TRUST_STORE_VARIABLES
 from tests.conftest import REPOSITORY, compose, needs_the_stack_up
 
 COMPOSE_FILE = REPOSITORY / "docker-compose.yml"
@@ -290,10 +294,10 @@ def _get(url: str) -> int:
 # --- The image carries only what a Run needs (ticket 01 of hardened-demo-image) ---
 
 
-def dockerfile_instructions() -> list[str]:
-    """The Dockerfile's instructions, continuation lines joined and comments dropped."""
+def dockerfile_instructions(dockerfile: Path = DOCKERFILE) -> list[str]:
+    """A Dockerfile's instructions, continuation lines joined and comments dropped."""
     instructions: list[str] = []
-    for raw in DOCKERFILE.read_text().splitlines():
+    for raw in dockerfile.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -304,12 +308,12 @@ def dockerfile_instructions() -> list[str]:
     return instructions
 
 
-def build_argument_default(name: str) -> str:
-    """What `ARG <name>=<default>` in the Dockerfile falls back to when compose passes nothing."""
-    for instruction in dockerfile_instructions():
+def build_argument_default(name: str, dockerfile: Path = DOCKERFILE) -> str:
+    """What `ARG <name>=<default>` in a Dockerfile falls back to when compose passes nothing."""
+    for instruction in dockerfile_instructions(dockerfile):
         if instruction.startswith(f"ARG {name}="):
             return instruction.partition("=")[2].strip()
-    raise AssertionError(f"the Dockerfile declares no ARG {name}")
+    raise AssertionError(f"{dockerfile.name} declares no ARG {name}")
 
 
 def test_the_image_is_built_from_the_slim_official_node_image_at_a_pinned_tag():
@@ -330,8 +334,8 @@ PACKAGES_A_RUN_NEEDS = {"ca-certificates", "python3", "python3-venv"}
 the Receiver and hold jira-as."""
 
 
-def run_instructions() -> list[str]:
-    return [line for line in dockerfile_instructions() if line.startswith("RUN ")]
+def run_instructions(dockerfile: Path = DOCKERFILE) -> list[str]:
+    return [line for line in dockerfile_instructions(dockerfile) if line.startswith("RUN ")]
 
 
 def apt_packages() -> set[str]:
@@ -468,3 +472,206 @@ class TestTheImageCarriesOnlyWhatARunNeeds:
             tuple(int(part) for part in version.lstrip("v").split("."))
             >= NODE_READS_THE_OS_TRUST_STORE
         ), version
+
+
+# --- A corporate CA is trusted through the build and every Run (ticket 02) ---
+
+ROLLDICE_DOCKERFILE = REPOSITORY / "docker" / "rolldice" / "Dockerfile"
+"""The other image this repo builds. Its build reaches PyPI through the same proxy."""
+
+BOTH_DOCKERFILES = (DOCKERFILE, ROLLDICE_DOCKERFILE)
+
+ROLLDICE_SERVICE = "rolldice"
+
+EXTRA_CA_ARGUMENT = "EXTRA_CA_CERT"
+"""The build argument naming a PEM file in the build context; the presenter's shell sets it."""
+
+CERTIFICATES_DIRECTORY = "certs"
+"""Where the presenter puts the corporate CA. Git takes nothing from it but the placeholder."""
+
+PLACEHOLDER = f"{CERTIFICATES_DIRECTORY}/NO_EXTRA_CERTS"
+"""The committed, intentionally empty file the argument defaults to (story 8)."""
+
+SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+"""Where update-ca-certificates writes, and so where every trust-store variable points."""
+
+INSTALLED_CERTIFICATES = "/usr/local/share/ca-certificates"
+"""Where a certificate must be put for update-ca-certificates to add it to the bundle.
+Empty after a build with the placeholder."""
+
+PACKAGE_INSTALLS = ("npm install", "pip install", "opentelemetry-bootstrap")
+"""Every command in either build that reaches a registry over TLS (story 16)."""
+
+
+def instruction_index(dockerfile: Path, *fragments: str) -> int:
+    """Where the first instruction holding every fragment is, in build order."""
+    for index, instruction in enumerate(dockerfile_instructions(dockerfile)):
+        if all(fragment in instruction for fragment in fragments):
+            return index
+    raise AssertionError(f"{dockerfile.name} has no instruction holding {fragments}")
+
+
+def environment_set_by(dockerfile: Path) -> dict[str, tuple[int, str]]:
+    """Every `ENV name=value` in a Dockerfile: the variable, where it is set, and its value."""
+    variables: dict[str, tuple[int, str]] = {}
+    for index, instruction in enumerate(dockerfile_instructions(dockerfile)):
+        if instruction.startswith("ENV "):
+            for pair in instruction[len("ENV ") :].split():
+                name, _, value = pair.partition("=")
+                variables[name] = (index, value)
+    return variables
+
+
+def package_install_indexes(dockerfile: Path) -> list[int]:
+    return [
+        index
+        for index, instruction in enumerate(dockerfile_instructions(dockerfile))
+        if instruction.startswith("RUN ") and any(c in instruction for c in PACKAGE_INSTALLS)
+    ]
+
+
+@pytest.mark.parametrize("dockerfile", BOTH_DOCKERFILES, ids=lambda path: path.parent.name)
+def test_both_builds_take_a_corporate_ca_and_default_to_the_committed_placeholder(dockerfile):
+    """A build with no certificate named behaves exactly as before (story 8)."""
+    assert build_argument_default(EXTRA_CA_ARGUMENT, dockerfile) == PLACEHOLDER
+    assert f"COPY ${{{EXTRA_CA_ARGUMENT}}} " in " ".join(dockerfile_instructions(dockerfile))
+
+
+def test_the_placeholder_is_committed_and_intentionally_empty():
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", PLACEHOLDER], cwd=REPOSITORY, check=False
+    )
+
+    assert tracked.returncode == 0, f"{PLACEHOLDER} is not in git"
+    assert (REPOSITORY / PLACEHOLDER).stat().st_size == 0
+
+
+@pytest.mark.parametrize("dockerfile", BOTH_DOCKERFILES, ids=lambda path: path.parent.name)
+def test_the_certificate_is_trusted_before_anything_reaches_npm_or_pypi(dockerfile):
+    """The build itself must work behind the intercepting proxy, not only the runtime (story 16)."""
+    copied = instruction_index(dockerfile, "COPY", f"${{{EXTRA_CA_ARGUMENT}}}")
+    installed = instruction_index(dockerfile, "RUN", "update-ca-certificates")
+    installs = package_install_indexes(dockerfile)
+
+    assert installs, f"{dockerfile.name} installs nothing over TLS; the check reads nothing"
+    assert copied < installed < min(installs), dockerfile_instructions(dockerfile)
+
+
+def test_the_demo_image_points_every_tls_client_at_the_system_bundle():
+    """Set once, image-wide, before the installs that need them (story 17): Python's ssl
+    module and the Forwarder's urllib, jira-as's requests, pip, and Claude Code."""
+    variables = environment_set_by(DOCKERFILE)
+
+    for name in TRUST_STORE_VARIABLES:
+        assert name in variables, f"{name} is not set in the Dockerfile"
+        index, value = variables[name]
+        assert value == SYSTEM_BUNDLE, f"{name} is {value}"
+        assert index < min(package_install_indexes(DOCKERFILE)), f"{name} is set after an install"
+
+
+def test_the_rolldice_build_points_pip_at_the_system_bundle():
+    """Its build's only TLS clients are pip and the bootstrap that runs pip."""
+    index, value = environment_set_by(ROLLDICE_DOCKERFILE)["PIP_CERT"]
+
+    assert value == SYSTEM_BUNDLE
+    assert index < min(package_install_indexes(ROLLDICE_DOCKERFILE))
+
+
+@pytest.mark.parametrize("name", (DEMO_SERVICE, ROLLDICE_SERVICE))
+def test_compose_hands_the_presenters_certificate_to_both_builds(name):
+    """From the shell, with the placeholder as the default, so the build command is the same
+    on both laptops; and from the repo root, so the same path means the same file in both."""
+    build = service(name)["build"]
+
+    assert build["args"][EXTRA_CA_ARGUMENT] == f"${{{EXTRA_CA_ARGUMENT}:-{PLACEHOLDER}}}"
+    assert (REPOSITORY / build["context"]).resolve() == REPOSITORY
+
+
+def test_git_never_takes_a_certificate_but_does_take_the_placeholder():
+    """A corporate artifact must not end up in a public repository (story 6)."""
+    assert git_ignores(f"{CERTIFICATES_DIRECTORY}/corporate-root.crt")
+    assert git_ignores(f"{CERTIFICATES_DIRECTORY}/anything-else-at-all")
+    assert not git_ignores(PLACEHOLDER)
+
+
+def test_the_build_context_admits_the_certificate_directory():
+    for pattern in DOCKER_IGNORE.read_text().split():
+        assert not pattern.lstrip("/").startswith(CERTIFICATES_DIRECTORY), pattern
+
+
+# The trust store, asked directly (opt-in, like the rest of TestAStackThatIsUp).
+
+READ_THE_TRUST_STORE = f"""\
+import hashlib, json, os, re, ssl
+pem = re.compile(r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.S)
+def fingerprints(text):
+    return sorted(hashlib.sha256(ssl.PEM_cert_to_DER_cert(c)).hexdigest() for c in pem.findall(text))
+print(json.dumps({{
+    "environment": {{name: os.environ.get(name) for name in {TRUST_STORE_VARIABLES!r}}},
+    "bundle": fingerprints(open(os.environ["SSL_CERT_FILE"]).read()),
+    "loaded": sorted(hashlib.sha256(der).hexdigest()
+                     for der in ssl.create_default_context().get_ca_certs(binary_form=True)),
+    "installed": sorted(os.listdir({INSTALLED_CERTIFICATES!r})),
+}}))
+"""
+"""What the running container says about its trust store: the variables, the SHA-256
+fingerprints in the bundle they name, the ones Python's default SSL context really loaded
+from it, and whatever the build put where update-ca-certificates reads extras from."""
+
+
+def named_certificate() -> Path | None:
+    """The certificate the presenter's shell names for the build, or None for the placeholder.
+
+    The same variable compose reads, so the check and the build cannot disagree.
+    """
+    named = os.environ.get(EXTRA_CA_ARGUMENT, "") or PLACEHOLDER
+    return None if named == PLACEHOLDER else REPOSITORY / named
+
+
+def fingerprints_of(certificate: Path) -> set[str]:
+    """SHA-256 over the DER form of every certificate in a PEM file, as `openssl x509
+    -fingerprint -sha256` would print them, without the colons."""
+    blocks = re.findall(
+        r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+        certificate.read_text(),
+        re.DOTALL,
+    )
+    return {hashlib.sha256(ssl.PEM_cert_to_DER_cert(block)).hexdigest() for block in blocks}
+
+
+@pytest.fixture(scope="module")
+def trust_store() -> dict:
+    """The running container's answer, read once for the class below."""
+    read = compose("exec", "-T", DEMO_SERVICE, "python3", "-c", READ_THE_TRUST_STORE)
+    assert read.returncode == 0, read.stderr
+    return json.loads(read.stdout)
+
+
+@needs_the_stack_up
+class TestTheTrustStoreOfAStackThatIsUp:
+    """With `docker compose up -d` done: what the build put in the bundle, and whether the
+    Python every Jira call and the healthcheck run on loads it (story 23)."""
+
+    def test_every_tls_client_in_the_container_is_pointed_at_the_bundle(self, trust_store):
+        assert trust_store["environment"] == dict.fromkeys(TRUST_STORE_VARIABLES, SYSTEM_BUNDLE)
+
+    def test_python_loads_the_whole_bundle_the_variables_name(self, trust_store):
+        assert trust_store["bundle"], "the bundle is empty"
+        assert trust_store["loaded"] == trust_store["bundle"]
+
+    def test_the_named_certificate_is_in_the_bundle_and_python_loads_it(self, trust_store):
+        certificate = named_certificate()
+        if certificate is None:
+            pytest.skip(f"{EXTRA_CA_ARGUMENT} names no certificate; the placeholder was built")
+
+        expected = fingerprints_of(certificate)
+        assert expected, f"{certificate} holds no PEM certificate"
+        assert expected <= set(trust_store["bundle"]), "the build did not install it"
+        assert expected <= set(trust_store["loaded"]), "Python's default context did not load it"
+        assert trust_store["installed"] == ["extra-ca.crt"]
+
+    def test_a_build_with_the_placeholder_added_nothing(self, trust_store):
+        if named_certificate() is not None:
+            pytest.skip(f"{EXTRA_CA_ARGUMENT} names a certificate; it should be in the bundle")
+
+        assert trust_store["installed"] == []

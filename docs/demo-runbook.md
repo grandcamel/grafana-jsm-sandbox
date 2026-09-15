@@ -26,6 +26,82 @@ refreshes fast enough on its own to be trusted during the demo.
 Have two more tabs ready but not shown: [`skill/incident-sync/SKILL.md`](../skill/incident-sync/SKILL.md)
 in an editor, and the Incident itself once it exists (click it in the queue), for the comments.
 
+## On the work laptop: the corporate CA
+
+Skip this on a laptop with no intercepting proxy. On one that has one, such as Zscaler, every
+TLS connection from this machine, including from inside a container, presents a chain ending in
+the corporate root CA, and nothing trusts it until it is told to: the build's `npm` and `pip`
+installs, the Forwarder's calls to Atlassian, a Run's calls to Anthropic, and the shell's own
+`jira-as`. Four things, done once, the morning of.
+
+1. **Export the corporate root CA as PEM into `certs/`.** Git ignores everything in that
+   directory except the empty placeholder, so the certificate cannot be committed. On macOS,
+   Keychain Access, System keychain, find the corporate root, File, Export Items, format
+   Privacy Enhanced Mail; or from the shell, with the certificate's name as the keychain shows it:
+
+    ```bash
+    security find-certificate -c "Corporate Root CA" -p /Library/Keychains/System.keychain > certs/corporate-root.crt
+    ```
+
+    On Windows, `certmgr.msc`, Trusted Root Certification Authorities, export as Base-64
+    encoded X.509. Then read it back; it must print a subject and a fingerprint:
+
+    ```bash
+    openssl x509 -in certs/corporate-root.crt -noout -subject -fingerprint -sha256
+    ```
+
+    `unable to load certificate` means the export was DER, not PEM: convert it with
+    `openssl x509 -inform der -in exported.cer -out certs/corporate-root.crt`. Only PEM works;
+    the build stops with `EXTRA_CA_CERT is not a PEM certificate` on anything else.
+
+2. **Name it for the build.** One variable, read by both images this repo builds; the
+   certificate goes into each image's system trust store before any install, and the demo
+   image points Python, `requests`, pip and Claude Code at that store, which every Run inherits:
+
+    ```bash
+    export EXTRA_CA_CERT=certs/corporate-root.crt
+    ```
+
+    Then the usual `docker compose up -d --build`. Unset, the build uses the committed
+    placeholder and is the same build as on the personal laptop. Export it in the shell rather
+    than typing it per command, because the pre-demo check in step 4 reads the same variable.
+
+3. **Tell the shell's own `jira-as` the same.** The reset and the end-to-end check call
+   `jira-as` from this shell, not from the container, and it uses the `requests` library:
+
+    ```bash
+    export REQUESTS_CA_BUNDLE=certs/corporate-root.crt
+    ```
+
+    That replaces the bundle rather than adding to it, which is right when every connection
+    goes through the proxy. If some hosts bypass it, hand `requests` both:
+    `cat "$(python3 -c 'import certifi; print(certifi.where())')" certs/corporate-root.crt > certs/bundle.pem`
+    and name `certs/bundle.pem` instead.
+
+4. **Check the certificate is really in the running container.** After the stack is up, with
+   `EXTRA_CA_CERT` still exported: the opt-in container checks find the certificate's
+   fingerprint in the container's bundle and confirm Python's default SSL context loads it.
+   They fail on purpose if the shell names a certificate the container was not built with, or
+   names none when it was:
+
+    ```bash
+    DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py -q
+    ```
+
+    The one-line glance, which prints `extra-ca.crt` after a build with a certificate and
+    nothing after one without:
+
+    ```bash
+    docker compose exec -T demo ls /usr/local/share/ca-certificates
+    ```
+
+**Docker Desktop pulls are outside this repo.** The base images (`node`, `python`,
+`grafana/otel-lgtm`, `alpine`) are pulled by Docker Desktop's own daemon, which must trust the
+corporate CA itself; on macOS it reads the system keychain. A pull that fails with `x509:
+certificate signed by unknown authority` is a Docker Desktop setting, not anything here. Pull
+the four images the day before, on any network that lets you, and the build touches Docker Hub
+no further.
+
 ## Fifteen minutes before: pre-demo checks
 
 Run them in this order. Every one must pass before the audience arrives; none takes more than a
@@ -70,8 +146,9 @@ minute except the first.
     DEMO_CONTAINER=1 python3 -m pytest tests/test_grafana.py tests/test_container.py -q
     ```
 
-    All pass. The rule check needs the traffic to have been flowing for a minute, so run it after
-    step 3, not before. If a provisioning file was edited since the stack came up, Grafana has
+    All pass. On the work laptop, `EXTRA_CA_CERT` must still name the certificate the image
+    was built with (see above). The rule check needs the traffic to have been flowing for a
+    minute, so run it after step 3, not before. If a provisioning file was edited since the stack came up, Grafana has
     not seen it: `docker compose restart lgtm`, wait a minute, rerun.
 
 5. **Eyes.** Grafana's list shows the rule **Normal**. The Incidents queue shows nothing a Run
@@ -149,7 +226,9 @@ python3 -m grafana_jsm_sandbox.log_formatter fixtures/run-transcript.jsonl
 one process: the Receiver, and the Forwarder thread it owns, bound to the container's loopback.
 Each Run gets an environment built from scratch, not inherited: `JIRA_SITE_URL` pointing at the
 Forwarder over plain http and `JIRA_API_TOKEN` set to a random per-Run sentinel that the
-Forwarder registers when the Run starts and forgets when it ends. Every `forwarded ... upstream
+Forwarder registers when the Run starts and forgets when it ends. The only other thing it inherits
+is the container's trust store, five variables pointing at the one system bundle, so that on the
+work laptop a Run reaches Anthropic through the same proxy the build did. Every `forwarded ... upstream
 said` line in the log is the swap happening; a sentinel copied out of a Transcript is worth
 nothing afterwards (ADR 0002). Show `RunSpawner` in
 [`grafana_jsm_sandbox/run_spawner.py`](../grafana_jsm_sandbox/run_spawner.py) if asked how.

@@ -183,6 +183,17 @@ with. It mounts no Docker socket and holds no credential — those arrive at `do
 from `.env`, which git ignores and the build context refuses. The image is 539 MB; the developer
 image it replaced was 4.35 GB.
 
+On a laptop behind an intercepting proxy, one variable names the corporate root CA as a PEM
+file under `certs/`, a directory git takes nothing from but the empty placeholder the build
+defaults to. Both images install it into their system trust store before any `npm` or `pip`
+install, and the demo image points Python, `requests`, pip and Claude Code at that store
+through the standard trust-store variables, which each Run inherits alongside its sentinel and
+nothing else new. The runbook has the presenter's steps.
+
+```bash
+EXTRA_CA_CERT=certs/corporate-root.crt docker compose up -d --build
+```
+
 The Receiver answers on the compose network at `http://demo:8080`, which is what Grafana will
 post to, and on the laptop at `http://localhost:8080`, which is where the replay script posts:
 
@@ -286,6 +297,7 @@ deletes.
 | `docker/entrypoint.sh` | What the container starts: onboarding pre-accepted, then the Receiver |
 | `docker-compose.yml` | The LGTM stack, the demo container, rolldice and its traffic, on one network |
 | `docker/rolldice/` | The rolldice example app, copied from the otel-lgtm examples, auto-instrumented |
+| `certs/` | Where a corporate root CA goes for a build behind a proxy; only the empty placeholder is committed |
 | `grafana/provisioning/alerting/` | The contact point, the notification policy and the alert rule Grafana loads |
 | `.env.example` | Every variable the container needs, with placeholders |
 | `fixtures/notification-*.json` | The canned Notification sequence as Grafana really posted it: firing, repeat, resolved |
@@ -317,7 +329,9 @@ up -d` first. They ask the questions compose cannot answer on its own: whether t
 endpoint answers the laptop and the `lgtm` container, whether the Receiver is really running
 as a user who is not root with the two executables a Run is allowed on its PATH, and whether
 `sudo`, `docker`, `gh`, `git`, `curl` and `jq` are really absent from it, along with any `docker`
-group, on a Node new enough to read the operating system trust store.
+group, on a Node new enough to read the operating system trust store. When the shell's
+`EXTRA_CA_CERT` names a certificate, they also find its fingerprint in the container's bundle and
+confirm Python's default SSL context loads it; when it names none, that nothing was added.
 
 ```bash
 DEMO_CONTAINER=1 python3 -m pytest tests/test_container.py
@@ -341,6 +355,9 @@ redaction, the ignore rules through real `git check-ignore`, and the entrypoint 
 on a PATH holding only what the slim image carries. It holds the Dockerfile to ADR 0005: the base
 is the slim Node image at a pinned tag, Claude Code and `jira-as` are pinned, the distribution
 adds nothing but TLS roots and a Python, no line installs an escalation tool, and the last `USER`
-is one the Dockerfile created. It also holds compose to the three things the live Alert depends
+is one the Dockerfile created. It holds both Dockerfiles to the certificate mechanism: the
+corporate CA is installed before anything reaches npm or PyPI, the trust-store variables point at
+the system bundle, compose hands the same argument to both builds, and git ignores everything in
+`certs/` but the placeholder. It also holds compose to the three things the live Alert depends
 on: every service on the one network, this repo's provisioning directory mounted where Grafana
 reads it, and a stopped `traffic` staying stopped.

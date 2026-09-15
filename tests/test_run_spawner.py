@@ -21,6 +21,7 @@ from grafana_jsm_sandbox.receiver import Receiver, Run
 from grafana_jsm_sandbox.run_spawner import (
     ANTHROPIC_TOKEN_VARIABLE,
     SITE_OPERATIONS_VARIABLE,
+    TRUST_STORE_VARIABLES,
     RunSpawner,
 )
 from tests.conftest import (
@@ -40,6 +41,19 @@ ENVIRONMENT_FILE = "environment.json"
 PLATFORM_ADDITIONS = {"LC_CTYPE", "__CF_USER_TEXT_ENCODING"}
 """What macOS adds to every child process below the spawner. The container is Linux
 and adds nothing, so these are excluded rather than allowed for."""
+
+A_RUNS_VARIABLES = {
+    ANTHROPIC_TOKEN_VARIABLE,
+    "JIRA_EMAIL",
+    "JIRA_SITE_URL",
+    "JIRA_API_TOKEN",
+    SITE_OPERATIONS_VARIABLE,
+    "PATH",
+}
+"""Everything a Run is started with when the Receiver has no trust store to hand on."""
+
+SYSTEM_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"
+"""Where the image points every TLS client, and so what a Run inherits (ticket 02)."""
 
 
 def _program(*parts: str) -> list[str]:
@@ -134,17 +148,32 @@ def test_the_run_starts_in_its_own_working_directory(forwarder, run):
     assert (run.working_directory / ENVIRONMENT_FILE).exists()
 
 
-def test_the_runs_environment_is_built_from_scratch(forwarder, run):
+def test_the_runs_environment_is_built_from_scratch(forwarder, run, monkeypatch):
+    """A Receiver with no trust store of its own starts a Run with none either."""
+    for variable in TRUST_STORE_VARIABLES:
+        monkeypatch.delenv(variable, raising=False)
+
     spawner_for(_program(DUMP_ENVIRONMENT), forwarder)(run)
 
-    assert set(environment_of(run)) - PLATFORM_ADDITIONS == {
-        ANTHROPIC_TOKEN_VARIABLE,
-        "JIRA_EMAIL",
-        "JIRA_SITE_URL",
-        "JIRA_API_TOKEN",
-        SITE_OPERATIONS_VARIABLE,
-        "PATH",
+    assert set(environment_of(run)) - PLATFORM_ADDITIONS == A_RUNS_VARIABLES
+
+
+def test_a_run_trusts_the_certificates_the_receiver_trusts_and_nothing_else_new(
+    forwarder, run, monkeypatch
+):
+    """The image sets the trust-store variables for every process in it, and a Run's
+    Anthropic traffic goes through the same intercepting proxy the build did (ticket 02).
+    They are the only addition: the scrubbed environment of ADR 0002 stands."""
+    for variable in TRUST_STORE_VARIABLES:
+        monkeypatch.setenv(variable, SYSTEM_BUNDLE)
+
+    spawner_for(_program(DUMP_ENVIRONMENT), forwarder)(run)
+
+    environment = environment_of(run)
+    assert {variable: environment[variable] for variable in TRUST_STORE_VARIABLES} == {
+        variable: SYSTEM_BUNDLE for variable in TRUST_STORE_VARIABLES
     }
+    assert set(environment) - PLATFORM_ADDITIONS == A_RUNS_VARIABLES | set(TRUST_STORE_VARIABLES)
 
 
 def test_nothing_of_the_receivers_own_environment_reaches_the_run(forwarder, run, monkeypatch):
