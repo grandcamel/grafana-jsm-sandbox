@@ -1,7 +1,9 @@
 # Spec: Publish this repo publicly on GitHub
 
-Status: needs-info
+Status: wontfix
 Created: 2026-09-15
+
+**Folded into `.scratch/hardened-demo-image/spec.md` on 2026-09-15:** its steps are tickets 04 and 05 there, and its four decisions were taken (MIT; `.scratch/` kept and scrubbed; `grandcamel/grafana-jsm-sandbox`; placeholder URL in the runbook). Kept for the audit it records.
 
 ## Problem Statement
 
