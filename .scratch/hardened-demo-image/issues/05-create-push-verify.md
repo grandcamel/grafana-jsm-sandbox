@@ -43,11 +43,15 @@ pinned bases with nothing from this machine.
   anything: compose loads the demo service's `env_file` first and says `open .../.env: no such
   file or directory`. That is the same refusal that keeps `up` from starting a half-configured
   demo, and the README's first step after the clone is `cp .env.example .env`; so, with the
-  example copied in, `docker compose build --no-cache` built both images from scratch. Nothing
-  was pulled: the log resolves `node:24.21.0-trixie-slim` and `python:3.13-slim` locally in 0.0s
-  each, and the only network is npm for Claude Code 2.1.272 (15.5s), PyPI for `jira-as` 2.0.0
-  (8.9s) and for the rolldice instrumentation (32.6s). The images are 539 MB and 171 MB, the sizes
-  tickets 01 and 03 recorded. The GitHub clone's `docker compose build`, with the same example
+  example copied in, `docker compose build --no-cache` built both images from scratch. Both
+  bases were already on this laptop from tickets 01 and 03, so that build pulled nothing and the
+  only network was npm for Claude Code 2.1.272 (15.5s), PyPI for `jira-as` 2.0.0 (8.9s) and for
+  the rolldice instrumentation (32.6s). To exercise the pull without deleting the presenter's
+  cached images, `docker compose build --pull` from the GitHub clone then made the build ask
+  Docker Hub again: the log's only image references are `node:24.21.0-trixie-slim` and
+  `python:3.13-slim`, each resolved to its digest from the registry in about six seconds, with
+  every layer already present, and no other image named anywhere in it. The demo image is 539 MB, the size ticket 01
+  recorded; the rolldice image, which no ticket had measured, is 171 MB. The GitHub clone's `docker compose build`, with the same example
   env, then succeeded from the layer cache in seconds.
 - **The rendered README.** Every link in it was fetched from GitHub as the page resolves it: the
   eleven relative ones as `blob/main/...` for files and `tree/main/...` for directories (the two
@@ -69,3 +73,19 @@ throwaway script over `git ls-files`, not a committed test. The `--no-cache` bui
 previous builds' layers as dangling images on this laptop; pruning them is the presenter's call.
 The first attempt at `gh repo create` was refused by the session's permission classifier as the
 creation of a public surface; the author approved publishing in chat before the second.
+
+## What the review changed
+
+The standards review caught one mis-sourced number: the ticket said the 539 MB and 171 MB
+image sizes were "the sizes tickets 01 and 03 recorded", when ticket 01 records the demo
+image's alone and no ticket had measured rolldice. It now says so. Vocabulary, the ticket
+conventions and the quoted description sentence all checked out, and it found no smell to
+name in a prose diff.
+
+The spec review found the one real gap: the build paragraph claimed the checkbox's "pulling
+only the pinned base images" on a run whose own log showed both bases resolved locally in
+0.0s, which exercised no pull at all. Rather than delete the cached bases and risk a slow
+Docker Hub pull the morning of a demo, the build was re-run with `--pull` from the GitHub
+clone, which forces the registry to be asked for each base tag; the paragraph above now
+records what that showed. It confirmed the live repository's visibility, default branch,
+description, Issues and Actions settings against the API, and found no scope creep.
